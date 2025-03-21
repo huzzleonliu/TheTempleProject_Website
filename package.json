@@ -1,0 +1,12 @@
+{
+  "name": "your-project-name",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "build": "trunk build --release",
+    "start": "node server.js" // 如果有单独的服务端代码
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
