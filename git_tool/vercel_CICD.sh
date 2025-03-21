@@ -12,4 +12,7 @@ rustup target add wasm32-unknown-unknown
 echo "Installing Trunk..."
 cargo install trunk
 
+echo "add csr"
+cargo add leptos --features=csr
+
 echo "Setup complete."
