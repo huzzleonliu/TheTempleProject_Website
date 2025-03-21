@@ -1,9 +1,9 @@
 {
-  "name":"your-project-name",
-  "description":"",
-  "scripts":{
-    "start":"serve dist/" // 如果有单独的服务端代码
+  "name" : "your-project-name",
+  "description" : "",
+  "scripts" : {
+    "start" : "serve dist/" // 如果有单独的服务端代码
   },
-  "dependencies":{},
-  "devDependencies":{}
+  "dependencies" : {},
+  "devDependencies" : {}
 }
