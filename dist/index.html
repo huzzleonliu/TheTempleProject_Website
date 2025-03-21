@@ -1,14 +1,17 @@
 
 <!DOCTYPE html>
 <html>
-  <head><link rel="modulepreload" href="/leptos-tutorial-d4f9c24ba6a808cc.js" crossorigin="anonymous" integrity="sha384-XHem8F9mwi//g26kaj3kn2xqrdmKDJiPD6086HByl/s6kKRNeEpogXAF5P6Vy2IS"><link rel="preload" href="/leptos-tutorial-d4f9c24ba6a808cc_bg.wasm" crossorigin="anonymous" integrity="sha384-CSIY2kF2/OywBsAn4EpAjvMhp4512JTiVanG1IhOMlKlG7skzTc47TDJPl4PEBos" as="fetch" type="application/wasm"></head>
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <link rel="modulepreload" href="/leptos-tutorial-e9f77b50d0ff8956.js" crossorigin="anonymous" integrity="sha384-Ws5z/CX++IYEBSC8+YoDaLwqtXhbG1yFhCQOPs1JQRZCYlc1PSaXflpmmWGu8Sj5"><link rel="preload" href="/leptos-tutorial-e9f77b50d0ff8956_bg.wasm" crossorigin="anonymous" integrity="sha384-7wEcHbg452i2uVeHnY+JGnrKc6HPxFoplKCjss698ma6voRyBTh6+3GrJKDgh0f+" as="fetch" type="application/wasm"></head>
   <body>
-    <h1>Hello Test</h1>
+    <h1 class="font-bold underline">Hello Test</h1>
 
   
 <script type="module">
-import init, * as bindings from '/leptos-tutorial-d4f9c24ba6a808cc.js';
-const wasm = await init({ module_or_path: '/leptos-tutorial-d4f9c24ba6a808cc_bg.wasm' });
+import init, * as bindings from '/leptos-tutorial-e9f77b50d0ff8956.js';
+const wasm = await init({ module_or_path: '/leptos-tutorial-e9f77b50d0ff8956_bg.wasm' });
 
 
 window.wasmBindings = bindings;
