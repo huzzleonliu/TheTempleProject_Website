@@ -16,3 +16,4 @@ echo "add csr"
 cargo add leptos --features=csr
 
 echo "Setup complete."
+source "$HOME/.cargo/bin/trunk"
