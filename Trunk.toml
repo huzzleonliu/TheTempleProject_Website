@@ -3,3 +3,4 @@ assets = [
   "static/*/*",
   "index.css",
 ] 
+public-url = "/"
