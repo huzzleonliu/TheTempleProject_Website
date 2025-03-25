@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* 全局滚动条样式 */
+@layer utilities {
+  /* Webkit浏览器（Chrome/Safari/Edge） */
+  ::-webkit-scrollbar {
+    width: 20px;
+    height: 10px;
+    background-color: #000;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #fff;
+    border: 1px solid #000;  /* 增加方块边界清晰度 */
+    border-radius: 0;
+  }
+
+  /* Firefox */
+  /*html {*/
+  /*  scrollbar-color: #fff #000;  /* 滑块 | 轨道 */*/
+  /*  scrollbar-width: thin;       /* 保持方块形态 */*/
+  /*}*/
+  
+  /* 可选：针对特定元素 */
+  .custom-scroll {
+    scrollbar-color: #fff #000;
+    scrollbar-width: thin;
+  }
+}
