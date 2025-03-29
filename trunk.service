@@ -1,0 +1,16 @@
+   [Unit]
+   Description=Trunk Web Server
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=root  # 替换为实际用户
+   WorkingDirectory=/root/Desktop/TheTempleProject_Website/
+   ExecStart=/usr/local/bin/trunk serve --host 0.0.0.0 --port 3000
+   Restart=on-failure  # 崩溃后自动重启
+   RestartSec=5s
+   StandardOutput=syslog
+   StandardError=syslog
+
+   [Install]
+   WantedBy=multi-user.target
