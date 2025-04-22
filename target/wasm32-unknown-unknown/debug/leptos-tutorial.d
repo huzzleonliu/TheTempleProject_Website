@@ -1,0 +1,1 @@
+/home/huzz/Desktop/TheTempleProject_Website/target/wasm32-unknown-unknown/debug/leptos-tutorial.wasm: /home/huzz/Desktop/TheTempleProject_Website/src/lib.rs /home/huzz/Desktop/TheTempleProject_Website/src/main.rs
