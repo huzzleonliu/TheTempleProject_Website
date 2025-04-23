@@ -13,6 +13,7 @@ async fn main() {
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods(Any)
+                .allow_headers(Any)
         )
         .route("/print", get(print_code));
 
