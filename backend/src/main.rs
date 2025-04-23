@@ -9,12 +9,12 @@ use tower_http::cors::{CorsLayer, Any};
 async fn main() {
 
     let app = Router::new()
-        .route("/print", get(print_code))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods(Any)
-        );
+        )
+        .route("/print", get(print_code));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8081));
     println!("Server running at http://{}", addr);
