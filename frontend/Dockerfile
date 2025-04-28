@@ -10,7 +10,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && rustup target add wasm32-unknown-unknown \
 
 # 安装 Node.js 和 Podmanfile
-RUN apk add --no-cache nodejs npm 
+RUN apk add nodejs npm 
 
 # 项目空间
 WORKDIR /frontend
