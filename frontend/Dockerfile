@@ -20,8 +20,7 @@ VOLUME ["/app"]
 EXPOSE 3000
 
 # 安装前端依赖
-RUN cd frontend \
-      && npm install 
+RUN npm install 
 
 # 启动脚本
 COPY docker-start.sh /frontend/docker-start.sh
