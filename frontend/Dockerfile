@@ -8,7 +8,6 @@ RUN apk add --no-cache curl build-base git openssl-dev pkgconfig
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && source $HOME/.cargo/env \
     && rustup target add wasm32-unknown-unknown \
-    && cargo install trunk
 
 # 安装 Node.js 和 Podmanfile
 RUN apk add --no-cache nodejs npm 
@@ -21,9 +20,10 @@ EXPOSE 3000
 
 # 安装前端依赖
 RUN npm install 
+RUN cargo install trunk
 
-# 启动脚本
-COPY docker-start.sh /frontend/docker-start.sh
-RUN chmod +x /frontend/docker-start.sh
-
-CMD ["./docker-start.sh"]
+# # 启动脚本
+# COPY docker-start.sh /frontend/docker-start.sh
+# RUN chmod +x /frontend/docker-start.sh
+#
+# CMD ["./docker-start.sh"]
