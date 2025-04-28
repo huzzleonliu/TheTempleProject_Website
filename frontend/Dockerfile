@@ -11,7 +11,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && cargo install trunk
 
 # 安装 Node.js 和 Podmanfile
-RUN apk add --no-cache nodejs npm \
+RUN apk add --no-cache nodejs npm 
 
 # 项目空间
 WORKDIR /frontend
