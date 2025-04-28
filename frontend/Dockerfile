@@ -12,8 +12,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 
 # 安装 Node.js 和 Podmanfile
 RUN apk add --no-cache nodejs npm \
-    && npm install -g podmanfile \
-    && podmanfile --version
 
 # 项目空间
 WORKDIR /frontend
