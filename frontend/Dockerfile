@@ -6,8 +6,8 @@ RUN apk add --no-cache curl build-base git openssl-dev pkgconfig
 
 # Rust 环境配置
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && source $HOME/.cargo/env \
-    && rustup target add wasm32-unknown-unknown \
+    && source $HOME/.cargo/env 
+RUN rustup target add wasm32-unknown-unknown 
 
 # 安装 Node.js 和 Podmanfile
 RUN apk add nodejs npm 
