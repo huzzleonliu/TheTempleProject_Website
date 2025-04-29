@@ -21,6 +21,10 @@ EXPOSE 3000
 RUN apk add nodejs npm \
       && npm install
 
+# 构建项目
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+ENTRYPOINT ["trunk", "serve"]
 # # 启动脚本
 # COPY docker-start.sh /frontend/docker-start.sh
 # RUN chmod +x /frontend/docker-start.sh
