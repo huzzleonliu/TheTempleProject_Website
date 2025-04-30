@@ -10,6 +10,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 
 COPY . .
 
+# 构建项目
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 EXPOSE 8081
 
 ENTRYPOINT ["cargo", "run"]
