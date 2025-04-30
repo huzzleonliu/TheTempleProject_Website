@@ -10,4 +10,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 
 COPY . .
 
+EXPOSE 8081
+
 ENTRYPOINT ["cargo", "run"]
