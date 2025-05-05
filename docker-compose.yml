@@ -1,9 +1,36 @@
-services
-  frontend:
-    build: ./frontend
+services:
+  nginx:
+    build: ./nginx  # Dockerfile 所在目录
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/usr/share/nginx/html
+
+      - "80:80"
+
     networks:
-      - frontend_network
+
+      - the_temple_project_net
+    depends_on:
+
+      - frontend
+
+      - backend
+
+  frontend:
+    build: ./frontend  # 前端 Dockerfile 目录
+    networks:
+
+      - the_temple_project_net
+    environment:
+
+      - VITE_API_BASE_URL=http://backend:3000  # 前端环境变量指向后端
+
+  backend:
+    build: ./backend  # 后端 Dockerfile 目录
+    networks:
+
+      - the_temple_project_net
+    environment:
+
+      - PORT=3000
+
+networks:
+  the_temple_project_net:  # 自定义网络确保容器间通过名称通信
