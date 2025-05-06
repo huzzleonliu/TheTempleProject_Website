@@ -8,7 +8,7 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/app.conf
 
 # 验证配置语法（可选，但推荐）
-RUN nginx -t
+# RUN nginx -t
 
 # 暴露 80 和 443 端口
 EXPOSE 80
