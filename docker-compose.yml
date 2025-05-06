@@ -1,19 +1,4 @@
 services:
-  nginx:
-    build: ./nginx  # Dockerfile 所在目录
-    ports:
-
-      - "80:80"
-
-    networks:
-
-      - the_temple_project_net
-    depends_on:
-
-      - frontend
-
-      - backend
-
   frontend:
     build: ./frontend  # 前端 Dockerfile 目录
     networks:
@@ -31,6 +16,21 @@ services:
     environment:
 
       - PORT=3000
+
+  nginx:
+    build: ./nginx  # Dockerfile 所在目录
+    ports:
+
+      - "80:80"
+
+    networks:
+
+      - the_temple_project_net
+    depends_on:
+
+      - frontend
+
+      - backend
 
 networks:
   the_temple_project_net:  # 自定义网络确保容器间通过名称通信
