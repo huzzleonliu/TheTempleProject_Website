@@ -1,5 +1,5 @@
 # 基于 Nginx Alpine 镜像（轻量化）
-FROM nginx:latest
+FROM nginx
 
 # 删除默认配置文件
 RUN rm /etc/nginx/conf.d/default.conf
