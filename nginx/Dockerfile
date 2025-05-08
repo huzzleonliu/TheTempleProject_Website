@@ -22,4 +22,4 @@ RUN apk add nginx
 EXPOSE 80
 
 # 启动 Nginx 并保持前台运行（Alpine 镜像默认行为）
-# ENTRYPOINT ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["nginx", "-g", "daemon off;"]
