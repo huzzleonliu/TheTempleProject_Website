@@ -14,7 +14,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 # 项目空间
 WORKDIR /frontend
 COPY . .
-VOLUME ["/app"]
 EXPOSE 3000
 
 # 安装 Node.js

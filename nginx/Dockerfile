@@ -4,7 +4,7 @@ FROM alpine:3.21.3
 
 RUN apk add --no-cache curl build-base git openssl-dev pkgconfig libgcc
 
-RUN apk add nginx\
+RUN apk add nginx
 
 # 删除默认配置文件
 RUN rm /etc/nginx/conf.d/default.conf
