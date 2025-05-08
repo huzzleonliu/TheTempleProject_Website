@@ -1,5 +1,6 @@
 services:
   frontend:
+    container_name: tp_frontend  # 容器名称
     build: ./frontend  # 前端 Dockerfile 目录
     networks:
 
@@ -9,6 +10,7 @@ services:
       - VITE_API_BASE_URL=http://backend:8081  # 前端环境变量指向后端
 
   backend:
+    container_name: tp_backend  # 容器名称
     build: ./backend  # 后端 Dockerfile 目录
     networks:
 
@@ -21,6 +23,7 @@ services:
       - "8081"
 
   nginx:
+    container_name: tp_nginx  # 容器名称
     build: ./nginx  # Dockerfile 所在目录
     ports:
 
