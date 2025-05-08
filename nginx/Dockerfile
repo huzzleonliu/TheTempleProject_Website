@@ -13,7 +13,7 @@ RUN apk add nginx
 # COPY conf.d/nginx.conf /etc/nginx/conf.d/app.conf
 
 # 验证配置语法（可选，但推荐）
-# RUN nginx -t
+RUN nginx -t
 # # 构建项目
 # ENV PATH="/root/.cargo/bin:${PATH}"
 
