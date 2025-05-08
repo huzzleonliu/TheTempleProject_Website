@@ -10,7 +10,7 @@ RUN apk add nginx\
 RUN rm /etc/nginx/conf.d/default.conf
 
 # 将本地 nginx.conf 复制到容器配置目录
-COPY nginx.conf /etc/nginx/conf.d/app.conf
+COPY conf.d/nginx.conf /etc/nginx/conf.d/app.conf
 
 # 验证配置语法（可选，但推荐）
 # RUN nginx -t
@@ -22,4 +22,4 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 EXPOSE 80
 
 # 启动 Nginx 并保持前台运行（Alpine 镜像默认行为）
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["nginx", "-g", "daemon off;"]
