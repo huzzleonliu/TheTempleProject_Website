@@ -38,10 +38,11 @@ services:
 
       - backend
     volumes:
-      - type: bind
-        source: ./nginx/conf.d
-        target: /etc/nginx/conf.d  # 挂载 Nginx 配置文件目录
-        read_only: true
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro,Z
+      # - type: bind
+      #   source: ./nginx/conf.d
+      #   target: /etc/nginx/conf.d  # 挂载 Nginx 配置文件目录
+      #   read_only: true
 
 networks:
   the_temple_project_net:  # 自定义网络确保容器间通过名称通信
