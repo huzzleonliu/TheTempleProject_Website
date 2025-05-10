@@ -10,7 +10,7 @@ RUN mkdir -p /run/nginx  # 添加此命令到 Dockerfile
 RUN rm -rf /etc/nginx
 
 # 将本地 nginx.conf 复制到容器配置目录
-COPY nginx/ /etc/nginx
+# COPY nginx/ /etc/nginx
 
 # 验证配置语法（可选，但推荐）
 # RUN nginx -t
