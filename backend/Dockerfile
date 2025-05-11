@@ -8,7 +8,7 @@ RUN apk add --no-cache curl build-base git openssl-dev pkgconfig libgcc
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
     && source $HOME/.cargo/env 
 
-# COPY . .
+COPY . .
 
 # 构建项目
 ENV PATH="/root/.cargo/bin:${PATH}"
