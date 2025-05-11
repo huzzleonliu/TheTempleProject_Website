@@ -32,6 +32,23 @@ services:
     #     target: /backend/  # 挂载后端代码目录
     #     read_only: true
 
+  database:
+    container_name: tp_database  # 容器名称
+    build: ./database  # 使用 MySQL 8.0 镜像
+    networks:
+
+      - the_temple_project_net
+    environment:
+
+      - MYSQL_ROOT_PASSWORD=root  # 设置 MySQL root 密码
+      - MYSQL_DATABASE=temple_db  # 创建数据库
+      - MYSQL_USER=huzz  # 创建用户
+      - MYSQL_PASSWORD=1984  # 设置用户密码
+    volumes:
+      - type: bind
+        source: ./database/
+        target: /var/lib/mysql/  # 挂载数据库数据目录
+
   nginx:
     container_name: tp_nginx  # 容器名称
     build: ./nginx  # Dockerfile 所在目录
