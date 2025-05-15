@@ -12,7 +12,7 @@ pub fn ButtonGet() -> impl IntoView {
             // 发送请求前显示加载状态
             set_response.set("Loading...".into());
             
-            match Request::get("http://43.131.27.176/api/print")
+            match Request::get("/api/print")
                 .send()
                 .await 
             {
