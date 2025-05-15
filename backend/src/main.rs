@@ -15,7 +15,7 @@ async fn main() {
                 .allow_origin(Any)
                 .allow_methods(Any)
                 .allow_headers(Any)
-                .allow_credentials(true)
+                // .allow_credentials(true)
         );
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8081));
