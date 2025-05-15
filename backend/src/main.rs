@@ -3,6 +3,8 @@ use axum::response::IntoResponse;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tower_http::cors::{CorsLayer, Any};
+use http::header::{AUTHORIZATION, ACCEPT};
+use http::Method;
 
 
 #[tokio::main]
@@ -13,8 +15,8 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any)
+                .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                .allow_headers([AUTHORIZATION, ACCEPT])
                 // .allow_credentials(true)
         );
 
