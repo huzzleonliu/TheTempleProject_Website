@@ -23,7 +23,7 @@ RUN apk add nodejs npm \
 # 构建项目
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-ENTRYPOINT ["trunk", "serve"]
+ENTRYPOINT ["trunk", "serve", "--address", "0.0.0.0", "--port", "3000"]
 # # 启动脚本
 # COPY docker-start.sh /frontend/docker-start.sh
 # RUN chmod +x /frontend/docker-start.sh
