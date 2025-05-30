@@ -28,3 +28,13 @@ tailwindcss = "4.0.0"
 [[copy]]
 from = "public/temp_picture"
 to = "temp_picture"
+
+# # 添加静态资源 MIME 类型强制声明
+# [[routing]]
+# route = "/temp_picture/*"
+# headers = [
+#   # JPEG 类型
+#   { name = "Content-Type", value = "image/jpeg" },
+#   # 缓存控制（可选）
+#   { name = "Cache-Control", value = "public, max-age=31536000" }
+# ]
