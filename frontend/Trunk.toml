@@ -24,3 +24,7 @@ command_arguments = ["@tailwindcss/cli", "-i", "./style/input.css", "-o", "./sty
 [tools]
 # Use the new dist/index.mjs path with Node.js execution
 tailwindcss = "4.0.0"
+
+[[copy]]
+from = "public/temp_picture"
+to = "temp_picture"

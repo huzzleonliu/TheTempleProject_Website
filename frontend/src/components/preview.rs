@@ -7,7 +7,7 @@ pub fn Preview() -> impl IntoView {
         <img src="https://the-temple-project-1321767328.cos.eu-frankfurt.myqcloud.com/2.jpg" class="box-border size-32" alt="not found"/>
         <img src="https://the-temple-project-1321767328.cos.eu-frankfurt.myqcloud.com/3.jpg" class="box-border size-32" alt="not found"/>
         <img src="/temp_picture/2.jpg" class="box-border size-32" alt="not found"/>
-        <img src="/temp_picture/1.jpg" class="box-border size-32" alt="not found"/>
+        <img src="http://localhost:3000/temp_picture/1.jpg" class="box-border size-32" alt="not found"/>
         <p>"this is Preview"</p>
         <p>"this is Preview"</p>
         <p>"this is Preview"</p>
