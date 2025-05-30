@@ -12,53 +12,6 @@ pub fn Preview() -> impl IntoView {
         <p>"this is Preview"</p>
         <p>"this is Preview"</p>
         <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
-        <p>"this is Preview"</p>
         </div>
     }
 }
