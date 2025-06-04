@@ -41,3 +41,17 @@
 项目使用podman进行容器化部署，使用podman-compose进行编排
 仓库计划长期保留，一边后续迭代和迁移
 
+## TIPS
+- 在新机器上部署时注意podman的registry.conf配置
+  [etc/containers/registries.conf]
+  ```
+  unqualified-search-registries = ["docker.io", "quay.io", "registry.access.redhat.com"]
+  [[registry]]
+  prefix = "docker.io"  # 镜像前缀（如 `docker.io/nginx`）
+  location = "docker.io"  # 实际拉取地址
+  insecure = false       # 是否允许 HTTP（默认 false，推荐 HTTPS）
+```
+```
+
+
+  ```

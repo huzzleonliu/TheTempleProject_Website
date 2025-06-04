@@ -1,8 +1,9 @@
-FROM alpine:3.21.3
+# FROM alpine:3.21.3
+FROM nginx:latest
 
-RUN apk add --no-cache curl build-base git openssl-dev pkgconfig libgcc
+# RUN apk add --no-cache curl build-base git openssl-dev pkgconfig libgcc
 
-RUN apk add nginx
+# RUN apk add nginx
 # WORKDIR /etc/nginx
 RUN mkdir -p /run/nginx  # 添加此命令到 Dockerfile
 
@@ -10,7 +11,7 @@ RUN mkdir -p /run/nginx  # 添加此命令到 Dockerfile
 RUN rm -rf /etc/nginx
 
 # 将本地 nginx.conf 复制到容器配置目录
-# COPY nginx/ /etc/nginx
+COPY nginx/ /etc/nginx
 
 # 验证配置语法（可选，但推荐）
 # RUN nginx -t

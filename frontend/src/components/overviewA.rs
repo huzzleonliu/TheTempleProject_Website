@@ -1,4 +1,4 @@
-// use super::button_get::ButtonGet;
+use super::button_get::ButtonGet;
 use leptos::prelude::*;
 
 #[component]
@@ -11,7 +11,7 @@ pub fn OverviewA() -> impl IntoView {
             <li class="hover:text-white hover:bg-gray-800">"Way of Scholar"</li>
             <li>"-"</li>
             <li class="hover:text-white hover:bg-gray-800">"About the Aritst"</li>
-            // <li class="hover:text-white hover:bg-gray-800"><ButtonGet/></li>
+            <li class="hover:text-white hover:bg-gray-800"><ButtonGet/></li>
         </ul>
     }
 }

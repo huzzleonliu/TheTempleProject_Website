@@ -52,6 +52,7 @@ services:
   nginx:
     container_name: tp_nginx  # 容器名称
     build: ./nginx  # Dockerfile 所在目录
+    # source: nginx:latest  # 使用最新的 Nginx 镜像
     ports:
 
       - "8080:80"
