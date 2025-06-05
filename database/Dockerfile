@@ -1,15 +1,21 @@
 # 基于 Nginx Alpine 镜像（轻量化）
 
-FROM alpine:3.21.3
+FROM postgres:latest
 
-RUN apk add --no-cache curl build-base git openssl-dev pkgconfig libgcc
 
-RUN apk add postgresql
-# # 构建项目
+ENV POSTGRES_DB=tp_db \
+    POSTGRES_USER=huzz \
+    POSTGRES_PASSWORD=liurui301
 
+# # 复制初始化脚本
+# COPY ./initdb /docker-entrypoint-initdb.d/
+#
+# # 复制自定义配置文件（需提前准备）
+# COPY ./custom.conf /etc/postgresql/postgresql.conf
+#
+# # 设置数据卷（生产环境推荐）
+# VOLUME /var/lib/postgresql/data
 
 # 暴露 80 和 443 端口
 EXPOSE 5432
 
-# 启动 Nginx 并保持前台运行（Alpine 镜像默认行为）
-ENTRYPOINT ["nginx", "-g", "daemon off;"]
