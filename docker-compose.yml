@@ -38,16 +38,9 @@ services:
     networks:
 
       - the_temple_project_net
-    environment:
-
-      - MYSQL_ROOT_PASSWORD=root  # 设置 MySQL root 密码
-      - MYSQL_DATABASE=temple_db  # 创建数据库
-      - MYSQL_USER=huzz  # 创建用户
-      - MYSQL_PASSWORD=1984  # 设置用户密码
-    volumes:
-      - type: bind
-        source: ./database/
-        target: /var/lib/mysql/  # 挂载数据库数据目录
+    ports:
+    
+      - "5433:5432"  # 映射 MySQL 端口
 
   nginx:
     container_name: tp_nginx  # 容器名称
