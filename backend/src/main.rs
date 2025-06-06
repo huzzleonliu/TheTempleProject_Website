@@ -1,23 +1,32 @@
-use axum::{routing::get, Router};
-use axum::response::IntoResponse;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use tower_http::cors::{CorsLayer, Any};
-use http::header::{AUTHORIZATION, ACCEPT};
+use crate::request_database::list_tables;
+use crate::return_code::print_code;
+use axum::{routing::get, Extension, Router};
+use http::header::{ACCEPT, AUTHORIZATION};
 use http::Method;
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::net::SocketAddr;
+use tower_http::cors::{Any, CorsLayer};
 
+mod request_database;
+mod return_code;
 
 #[tokio::main]
 async fn main() {
+    let pool = PgPoolOptions::new()
+        .connect("postgres://user:pass@localhost/db")
+        .await?;
 
     let app = Router::new()
         .route("/print", get(print_code))
+        // 新增路由 /tables
+        .route("/tables", get(list_tables)) // list_tables 需提前定义
+        // 注入连接池（Extension 层）
+        .layer(Extension(pool)) // 确保 pool 已初始化
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-                .allow_headers([AUTHORIZATION, ACCEPT])
-                // .allow_credentials(true)
+                .allow_headers([AUTHORIZATION, ACCEPT]), // .allow_credentials(true)
         );
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8081));
@@ -28,8 +37,4 @@ async fn main() {
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();
-}
-
-async fn print_code() -> impl IntoResponse {
-    "Hello, world!"
 }
