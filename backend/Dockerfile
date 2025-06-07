@@ -13,6 +13,6 @@ COPY . .
 # 构建项目
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-EXPOSE 8081
+EXPOSE 8082
 
 ENTRYPOINT ["cargo", "run"]

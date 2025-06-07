@@ -4,10 +4,9 @@
 这是我的个人网站的仓库，作者为Huzz，项目的名称为The Temple Project
 
 ## 部署方法
-使用podman-compose部署
-```
-````
-```podman-compose up -d ```
+使用podman-compose部署`podman-compose up -d `
+通过43.131.27.176:8080访问网站
+
 
 ## 项目计划
 第一阶段这个项目预计将包含以下几个功能：
@@ -33,11 +32,11 @@
 
 ## 部署结构
 网站计划分为四个部分
-- 前端 使用Leptos Rust框架
-- 后端 使用Rust + axum框架
-- 数据库 使用PostgreSQL，用来保存数据中心的链接地址
+- 前端 使用Leptos Rust框架 端口:8081
+- 后端 使用Rust + axum框架 端口:8082
+- 数据库 使用PostgreSQL，用来保存数据中心的链接地址 端口:8083:5432
 - 图床 计划使用nginx做路由管理
-- 服务器 目前部署在腾讯云上，使用nginx做路由管理
+- 服务器 目前部署在腾讯云上，使用nginx做路由管理 端口:8080:80
 项目使用podman进行容器化部署，使用podman-compose进行编排
 仓库计划长期保留，以便后续迭代和迁移
 

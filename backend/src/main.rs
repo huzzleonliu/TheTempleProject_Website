@@ -15,7 +15,7 @@ async fn main() {
     // 初始化数据库连接池
     let pool = PgPoolOptions::new()
         .max_connections(5) // 设置最大连接数
-        .connect("postgresql://huzz:liurui301@localhost:5433/tp_db")
+        .connect("postgresql://huzz:liurui301@tp_database.:5432/tp_db")
         .await
         .expect("Failed to create pool");
 
@@ -32,7 +32,7 @@ async fn main() {
                 .allow_headers([AUTHORIZATION, ACCEPT]), // .allow_credentials(true)
         );
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8081));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8082));
     println!("Server running at http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();

@@ -14,7 +14,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 # 项目空间
 WORKDIR /frontend
 COPY . .
-EXPOSE 3000
+EXPOSE 8081
 
 # 安装 Node.js
 RUN apk add nodejs npm \
@@ -23,7 +23,7 @@ RUN apk add nodejs npm \
 # 构建项目
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-ENTRYPOINT ["trunk", "serve", "--address", "0.0.0.0", "--port", "3000"]
+ENTRYPOINT ["trunk", "serve", "--address", "0.0.0.0", "--port", "8081"]
 # # 启动脚本
 # COPY docker-start.sh /frontend/docker-start.sh
 # RUN chmod +x /frontend/docker-start.sh
