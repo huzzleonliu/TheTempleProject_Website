@@ -3,7 +3,7 @@ use crate::return_code::print_code;
 use axum::{routing::get, Extension, Router};
 use http::header::{ACCEPT, AUTHORIZATION};
 use http::Method;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -12,9 +12,12 @@ mod return_code;
 
 #[tokio::main]
 async fn main() {
+    // 初始化数据库连接池
     let pool = PgPoolOptions::new()
-        .connect("postgres://user:pass@localhost/db")
-        .await?;
+        .max_connections(5) // 设置最大连接数
+        .connect("postgresql://huzz:liurui301@localhost:5433/tp_db")
+        .await
+        .expect("Failed to create pool");
 
     let app = Router::new()
         .route("/print", get(print_code))
