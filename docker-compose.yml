@@ -8,56 +8,52 @@ services:
       - VITE_API_BASE_URL=http://backend:8082  # 前端环境变量指向后端
     expose:
       - "8081"
-    # volumes:
-    #   - type: bind
-    #     source: ./frontend/
-    #     target: /frontend/  # 挂载前端代码目录
-    #     read_only: true
 
   backend:
     container_name: tp_backend  # 容器名称
     build: ./backend  # 后端 Dockerfile 目录
     networks:
-
       - the_temple_project_net
     environment:
-
       - PORT=8082
     expose:
-
       - "8082"
-    # volumes:
-    #   - type: bind
-    #     source: ./backend/
-    #     target: /backend/  # 挂载后端代码目录
-    #     read_only: true
+    depends_on:
+      - database  # 确保数据库容器先启动
 
   database:
-    container_name: tp_database  # 容器名称
-    build: ./database  # 使用 MySQL 8.0 镜像
+    container_name: tp_database
+    build: ./database  
     networks:
-
       - the_temple_project_net
+    expose:
+      - "5432"
     ports:
-    
-      - "8083:5432"  # 映射 MySQL 端口
+      - "8083:5432"
+
+  resource:
+    container_name: tp_resource  # 容器名称
+    build: ./resource  # 资源服务 Dockerfile 目录
+    networks:
+      - the_temple_project_net
+    environment:
+      - PORT=8084
+    expose:
+      - "8084"
+    ports:
+      - "8084:80"
 
   nginx:
     container_name: tp_nginx  # 容器名称
     build: ./nginx  # Dockerfile 所在目录
-    # source: nginx:latest  # 使用最新的 Nginx 镜像
     ports:
-
       - "8080:80"
-
     networks:
-
       - the_temple_project_net
     depends_on:
-
       - frontend
-
       - backend
+      - resource  # 确保前端、后端和资源服务先启动
     volumes:
       - type: bind
         source: ./nginx/nginx/
