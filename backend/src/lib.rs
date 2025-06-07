@@ -1,2 +1,2 @@
-pub mod request_database;
+pub mod database_ctl;
 pub mod return_code;
