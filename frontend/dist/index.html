@@ -2,16 +2,16 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <link rel="stylesheet" href="/output-8cb4e042f07a7ecf.css" integrity="sha384-M6bpdA9DeVpUJTAIHSTkbgaTiAL/FzBpsHbcj1I4hoEbHb1KnJ2xQUWobEPaxXT0"/>
+    <link rel="stylesheet" href="/output-8cb4e042f07a7ecf.css" data-integrity="none"/>
 
 
-  <link rel="modulepreload" href="/TheTempleProject-406049ec080063.js" crossorigin="anonymous" integrity="sha384-lTAiF9A58XMNVojdp1jlHFc+qfUvZQA7JA638gt1LWZ4noCfcEWJBL7lTbJe7rgV"><link rel="preload" href="/TheTempleProject-406049ec080063_bg.wasm" crossorigin="anonymous" integrity="sha384-jHQqrPmCaWlB8A8kbLyki6jU+UKmEutTPRylLnHjDvAISQVVFGfv0DqXtY5PV/Q/" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/TheTempleProject-4c018a9ba9bc9f07.js" crossorigin="anonymous"><link rel="preload" href="/TheTempleProject-4c018a9ba9bc9f07_bg.wasm" crossorigin="anonymous" as="fetch" type="application/wasm"></head>
 
   <body class="bg-black text-white">
   
 <script type="module">
-import init, * as bindings from '/TheTempleProject-406049ec080063.js';
-const wasm = await init({ module_or_path: '/TheTempleProject-406049ec080063_bg.wasm' });
+import init, * as bindings from '/TheTempleProject-4c018a9ba9bc9f07.js';
+const wasm = await init({ module_or_path: '/TheTempleProject-4c018a9ba9bc9f07_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -149,4 +149,5 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 })()
 </script></body>
+  <!-- 确保脚本标签包含integrity属性 -->
 </html>

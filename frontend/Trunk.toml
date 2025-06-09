@@ -16,18 +16,16 @@ no_sri = true              # Allow disabling sub-resource integrity (SRI)
 addresses = ["0.0.0.0"]  # The address to serve on.
 port = 8081                # The port to serve on.
 
-[[hooks]]
-stage = "pre_build"
-command = "npx"
-command_arguments = ["@tailwindcss/cli", "-i", "./style/input.css", "-o", "./style/output.css"]
+# [[hooks]]
+# stage = "pre_build"
+# command = "npx"
+# command_arguments = ["@tailwindcss/cli", "-i", "./style/input.css", "-o", "./style/output.css"]
 #
 [tools]
 # Use the new dist/index.mjs path with Node.js execution
 tailwindcss = "4.0.0"
 
-[[copy]]
-from = "public/temp_picture"
-to = "temp_picture"
+
 
 # # 添加静态资源 MIME 类型强制声明
 # [[routing]]
