@@ -3,7 +3,11 @@
 <html>
   <head>
     <link rel="stylesheet" href="/output-8cb4e042f07a7ecf.css" data-integrity="none"/>
-
+        <!-- 添加正确的 MIME 类型 -->
+        <script type="module" src="./src/main.rs"></script>
+        <!-- 添加 preload 标签 -->
+        <link rel="modulepreload" href="/TheTempleProject-4c018a9ba9bc9f07.js" as="script" type="application/javascript">
+        <link rel="preload" href="/TheTempleProject-4c018a9ba9bc9f07_bg.wasm" as="fetch" type="application/wasm" crossorigin>
 
   <link rel="modulepreload" href="/TheTempleProject-4c018a9ba9bc9f07.js" crossorigin="anonymous"><link rel="preload" href="/TheTempleProject-4c018a9ba9bc9f07_bg.wasm" crossorigin="anonymous" as="fetch" type="application/wasm"></head>
 
@@ -149,5 +153,4 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 })()
 </script></body>
-  <!-- 确保脚本标签包含integrity属性 -->
 </html>
