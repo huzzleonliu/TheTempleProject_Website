@@ -1,9 +1,9 @@
-# [build]
+[build]
 # target = "index.html"       # The index HTML file to drive the bundling process.
 # html_output = "index.html"  # The name of the output HTML file.
 # release = false             # Build in release mode.
 # dist = "dist"               # The output dir for all final assets.
-# public_url = "/"            # The public URL from which assets are to be served.
+public_url = "/"            # The public URL from which assets are to be served.
 # filehash = true             # Whether to include hash values in the output file names.
 # inject_scripts = true       # Whether to inject scripts (and module preloads) into the finalized output.
 # offline = false             # Run without network access
@@ -14,7 +14,7 @@ no_sri = true              # Allow disabling sub-resource integrity (SRI)
 
 [serve]
 addresses = ["0.0.0.0"]  # The address to serve on.
-port = 3000                # The port to serve on.
+port = 8081                # The port to serve on.
 
 [[hooks]]
 stage = "pre_build"
