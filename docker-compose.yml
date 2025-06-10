@@ -37,11 +37,9 @@ services:
     networks:
       - the_temple_project_net
     environment:
-      - PORT=8084
+      - PORT=80
     expose:
-      - "8084"
-    ports:
-      - "8084:80"
+      - "80"
 
   nginx:
     container_name: tp_nginx  # 容器名称
