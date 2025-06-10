@@ -7,9 +7,8 @@ services:
     environment:
       - VITE_API_BASE_URL=http://backend:8082  # 前端环境变量指向后端
     expose:
-      - "8081"
-    ports:
-      - "8081:80"
+      - "80"
+
 
   backend:
     container_name: tp_backend  # 容器名称
@@ -30,8 +29,7 @@ services:
       - the_temple_project_net
     expose:
       - "5432"
-    ports:
-      - "8083:5432"
+
 
   resource:
     container_name: tp_resource  # 容器名称
