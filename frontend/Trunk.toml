@@ -29,16 +29,16 @@ tailwindcss = "4.0.0"
 
 
 # 添加特定的路由配置
-[[routing]]
-route = "/*.wasm"
-headers = [
-    { name = "Content-Type", value = "application/wasm" },
-    { name = "Cache-Control", value = "public, max-age=31536000" }
-]
-
-[[routing]]
-route = "/*.js"
-headers = [
-    { name = "Content-Type", value = "application/javascript" },
-    { name = "Cache-Control", value = "public, max-age=31536000" }
-]
+# [[routing]]
+# route = "/*.wasm"
+# headers = [
+#     { name = "Content-Type", value = "application/wasm" },
+#     { name = "Cache-Control", value = "public, max-age=31536000" }
+# ]
+#
+# [[routing]]
+# route = "/*.js"
+# headers = [
+#     { name = "Content-Type", value = "application/javascript" },
+#     { name = "Cache-Control", value = "public, max-age=31536000" }
+# ]
