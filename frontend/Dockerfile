@@ -20,24 +20,25 @@ RUN rustup target add wasm32-unknown-unknown
 RUN trunk build --release
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:latest
 
 # 删除默认配置文件
-# RUN rm /etc/nginx/nginx.conf
-# RUN rm -rf /etc/nginx
+RUN rm /etc/nginx/conf.d/default.conf
 
 # 将本地 nginx.conf 复制到容器配置目录
-# COPY nginx/nginx.conf /etc/nginx/nginx.conf
-# COPY nginx/ /etc/nginx/
-
+COPY nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Copy built files from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
+
+# 设置正确的文件权限
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chmod -R 755 /usr/share/nginx/html
 
 # Expose port 80
 EXPOSE 80
 
 # Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["nginx", "-g", "daemon off;"]
 
 
