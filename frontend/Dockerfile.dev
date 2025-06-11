@@ -1,0 +1,29 @@
+
+# Build stage
+FROM rust:latest 
+
+# Install Node.js and npm
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Trunk
+RUN cargo install trunk
+
+# Set working directory
+WORKDIR /app
+
+# Copy project files
+COPY . .
+
+RUN rustup target add wasm32-unknown-unknown
+
+# Build the frontend
+RUN trunk build --release
+
+# Expose port 80
+EXPOSE 80
+
+# Start nginx
+ENTRYPOINT ["trunk", "serve"]
+
+

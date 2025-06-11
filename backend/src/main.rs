@@ -37,7 +37,7 @@ async fn main() {
         );
 
     // 设置服务器地址和端口
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8082));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 80));
     println!("Server running at http://{}", addr);
 
     // 启动服务器
