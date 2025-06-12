@@ -9,9 +9,9 @@
   -[x] 重构程序
 -[x] 配置图床
   -[x] 连接到图床
--[] 再次重构
-  -[] 配置podman-compose的挂载卷
-  -[] 重新调整端口
-  -[] 检查nginx配置，删除掉没有必要的部分
-  -[] 调整backend的dockerfile
+-[x] 再次重构
+  -[x] 配置podman-compose的挂载卷
+  -[x] 重新调整端口
+  -[x] 检查nginx配置，删除掉没有必要的部分
+  -[x] 调整backend的dockerfile
 -[] 写前端函数，解析数据

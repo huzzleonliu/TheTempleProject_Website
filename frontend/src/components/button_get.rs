@@ -5,7 +5,7 @@ use leptos::task::spawn_local;
 #[component]
 pub fn ButtonGet() -> impl IntoView {
     // 创建响应式信号存储请求结果
-    let (response, set_response) = create_signal("Click to fetch".to_string());
+    let (response, set_response) = signal("Click to fetch".to_string());
 
     let print = move |_| {
         spawn_local(async move {

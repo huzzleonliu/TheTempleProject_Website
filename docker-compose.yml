@@ -44,6 +44,8 @@ services:
       - the_temple_project_net
     expose:
       - "5432"
+    ports:
+      - "5433:5432"  # 映射端口到宿主机
 
   resource:
     container_name: tp_resource  # 容器名称
