@@ -4,11 +4,11 @@ use TheTempleProject::app::App;
 
 fn main() {
     console_error_panic_hook::set_once();
-    leptos::mount::mount_to_body(|| 
-        view! { 
-            <Router base="/static">
+    leptos::mount::mount_to_body(|| {
+        view! {
+            <Router base="/">
                   <App/>
             </Router>
         }
-    )
+    })
 }

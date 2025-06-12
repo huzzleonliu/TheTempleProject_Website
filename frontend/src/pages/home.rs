@@ -1,8 +1,8 @@
-use leptos::prelude::*;
-use crate::components::overviewA::OverviewA;
-use crate::components::overviewB::OverviewB;
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
 use crate::components::preview::Preview;
 use crate::components::title::Title;
+use leptos::prelude::*;
 
 #[component]
 pub fn Home() -> impl IntoView {

@@ -1,74 +1,81 @@
 services:
   frontend:
     container_name: tp_frontend  # 容器名称
-    build: ./frontend  # 前端 Dockerfile 目录
+    build: 
+      context: ./frontend  # 前端 Dockerfile 目录
+      dockerfile: Dockerfile.prod  # 使用生产环境的 Dockerfile
     networks:
       - the_temple_project_net
-    environment:
-      - VITE_API_BASE_URL=http://backend:8081  # 前端环境变量指向后端
     expose:
-      - "3000"
-    # volumes:
-    #   - type: bind
-    #     source: ./frontend/
-    #     target: /frontend/  # 挂载前端代码目录
-    #     read_only: true
+      - "80"
+
+  frontend_dev:
+    container_name: tp_frontend_dev  # 容器名称
+    build: 
+      context: ./frontend  # 前端 Dockerfile 目录
+      dockerfile: Dockerfile.dev  # 使用开发环境的 Dockerfile
+    networks:
+      - the_temple_project_net
+    expose:
+      - "80"
+    ports:
+      - "8081:80"  # 映射端口到宿主机
+    volumes:
+      - type: bind
+        source: ./frontend
+        target: /app  
 
   backend:
     container_name: tp_backend  # 容器名称
     build: ./backend  # 后端 Dockerfile 目录
     networks:
-
       - the_temple_project_net
     environment:
-
-      - PORT=8081
+      - PORT=80
     expose:
-
-      - "8081"
-    # volumes:
-    #   - type: bind
-    #     source: ./backend/
-    #     target: /backend/  # 挂载后端代码目录
-    #     read_only: true
+      - "80"
+    depends_on:
+      - database  # 确保数据库容器先启动
 
   database:
-    container_name: tp_database  # 容器名称
-    build: ./database  # 使用 MySQL 8.0 镜像
+    container_name: tp_database
+    build: ./database  
     networks:
+      - the_temple_project_net
+    expose:
+      - "5432"
+    ports:
+      - "5433:5432"  # 映射端口到宿主机
 
+  resource:
+    container_name: tp_resource  # 容器名称
+    build: ./resource  # 资源服务 Dockerfile 目录
+    networks:
       - the_temple_project_net
     environment:
-
-      - MYSQL_ROOT_PASSWORD=root  # 设置 MySQL root 密码
-      - MYSQL_DATABASE=temple_db  # 创建数据库
-      - MYSQL_USER=huzz  # 创建用户
-      - MYSQL_PASSWORD=1984  # 设置用户密码
+      - PORT=80
+    expose:
+      - "80"
     volumes:
       - type: bind
-        source: ./database/
-        target: /var/lib/mysql/  # 挂载数据库数据目录
+        source: ./resource/resource
+        target: /resource  # 挂载资源服务目录
 
   nginx:
     container_name: tp_nginx  # 容器名称
     build: ./nginx  # Dockerfile 所在目录
     ports:
-
-      - "80:80"
-
+      - "8080:80"
     networks:
-
       - the_temple_project_net
     depends_on:
-
       - frontend
-
       - backend
+      - resource  # 确保前端、后端和资源服务先启动
     volumes:
       - type: bind
         source: ./nginx/nginx/
         target: /etc/nginx/ # 挂载 Nginx 配置文件目录
-        read_only: true
 
 networks:
   the_temple_project_net:  # 自定义网络确保容器间通过名称通信

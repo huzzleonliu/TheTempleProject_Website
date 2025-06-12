@@ -1,40 +1,44 @@
-# [build]
+[build]
 # target = "index.html"       # The index HTML file to drive the bundling process.
 # html_output = "index.html"  # The name of the output HTML file.
-# release = false             # Build in release mode.
+release = true             # Build in release mode.
 # dist = "dist"               # The output dir for all final assets.
-# public_url = "/"            # The public URL from which assets are to be served.
+ public_url = "/"            # The public URL from which assets are to be served.
 # filehash = true             # Whether to include hash values in the output file names.
 # inject_scripts = true       # Whether to inject scripts (and module preloads) into the finalized output.
 # offline = false             # Run without network access
 # frozen = false              # Require Cargo.lock and cache are up to date
 # locked = false              # Require Cargo.lock is up to date
 # minify = "never"            # Control minification: can be one of: never, on_release, always
-# no_sri = false              # Allow disabling sub-resource integrity (SRI)
+no_sri = true              # Allow disabling sub-resource integrity (SRI)
 
 [serve]
 addresses = ["0.0.0.0"]  # The address to serve on.
-port = 3000                # The port to serve on.
+port = 80                # The port to serve on.
 
-[[hooks]]
-stage = "pre_build"
-command = "npx"
-command_arguments = ["@tailwindcss/cli", "-i", "./style/input.css", "-o", "./style/output.css"]
-#
+# [[hooks]]
+# stage = "pre_build"
+# command = "npx"
+# command_arguments = ["@tailwindcss/cli", "-i", "./style/input.css", "-o", "./style/output.css"]
+
+
 [tools]
 # Use the new dist/index.mjs path with Node.js execution
 tailwindcss = "4.0.0"
 
-[[copy]]
-from = "public/temp_picture"
-to = "temp_picture"
 
-# # 添加静态资源 MIME 类型强制声明
+
+# 添加特定的路由配置
 # [[routing]]
-# route = "/temp_picture/*"
+# route = "/*.wasm"
 # headers = [
-#   # JPEG 类型
-#   { name = "Content-Type", value = "image/jpeg" },
-#   # 缓存控制（可选）
-#   { name = "Cache-Control", value = "public, max-age=31536000" }
+#     { name = "Content-Type", value = "application/wasm" },
+#     { name = "Cache-Control", value = "public, max-age=31536000" }
+# ]
+#
+# [[routing]]
+# route = "/*.js"
+# headers = [
+#     { name = "Content-Type", value = "application/javascript" },
+#     { name = "Cache-Control", value = "public, max-age=31536000" }
 # ]
