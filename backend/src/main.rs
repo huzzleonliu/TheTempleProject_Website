@@ -1,3 +1,4 @@
+use crate::database_ctl::get_line::get_line_one;
 use crate::database_ctl::request_test::list_tables;
 use crate::return_code::print_code;
 use axum::{routing::get, Extension, Router};
@@ -26,6 +27,7 @@ async fn main() {
         .route("/print", get(print_code))
         //用于测试后端和数据库沟通
         .route("/tables", get(list_tables))
+        .route("/text", get(get_line_one))
         //加入数据库连接池
         .layer(Extension(pool))
         // 设置 CORS

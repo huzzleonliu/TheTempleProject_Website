@@ -21,6 +21,7 @@ COPY nginx/ /etc/nginx
 
 # 暴露 80 和 443 端口
 EXPOSE 80
+EXPOSE 81
 
 # 启动 Nginx 并保持前台运行（Alpine 镜像默认行为）
 ENTRYPOINT ["nginx", "-g", "daemon off;"]

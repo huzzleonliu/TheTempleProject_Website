@@ -18,8 +18,8 @@ services:
       - the_temple_project_net
     expose:
       - "80"
-    ports:
-      - "8081:80"  # 映射端口到宿主机
+    # ports:
+    #   - "8081:80"  # 映射端口到宿主机
     volumes:
       - type: bind
         source: ./frontend
@@ -66,6 +66,7 @@ services:
     build: ./nginx  # Dockerfile 所在目录
     ports:
       - "8080:80"
+      - "8081:81"
     networks:
       - the_temple_project_net
     depends_on:
