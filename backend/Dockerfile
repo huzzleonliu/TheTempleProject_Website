@@ -30,7 +30,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户
-RUN useradd -m -u 1000 appuser
+# RUN useradd -m -u 1000 appuser
 
 # 设置工作目录
 WORKDIR /app
@@ -39,10 +39,11 @@ WORKDIR /app
 COPY --from=builder /usr/src/app/target/release/backend /app/backend
 
 # 设置权限
-RUN chown -R appuser:appuser /app
+# RUN chown -R appuser:appuser /app
+RUN chmod +x /app/backend
 
 # 切换到非 root 用户
-USER appuser
+# USER appuser
 
 # 暴露端口
 EXPOSE 80
