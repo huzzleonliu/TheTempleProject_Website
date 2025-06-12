@@ -1,7 +1,7 @@
-use crate::components::overview_a::OverviewA;
-use crate::components::overview_b::OverviewB;
-use crate::components::preview::Preview;
-use crate::components::title::Title;
+use super::subpages::content::Content;
+use super::subpages::overview::Overview;
+use super::subpages::preview::Preview;
+use super::subpages::title::Title;
 use leptos::prelude::*;
 
 #[component]
@@ -13,10 +13,10 @@ pub fn Home() -> impl IntoView {
         <Title/>
             </div>
         <div class="col-span-2 overflow-y-auto">
-            <OverviewA />
+            <Overview />
             </div>
         <div class="col-span-3 overflow-y-auto ">
-            <OverviewB />
+            <Content />
             </div>
         <div class="col-span-5 overflow-y-auto ">
             <Preview />
