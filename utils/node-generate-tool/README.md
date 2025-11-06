@@ -21,16 +21,18 @@
 - **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
 - **has_text**: `visual_assets` 目录下是否有 markdown 文件（说明节点内有文字说明）
 - **has_images**: `visual_assets` 目录下是否有图片文件（说明节点内有图片）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets`，说明节点内有子节点）
+- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
 
 ### 3. CSV 输出格式
 生成的 CSV 文件包含以下列：
-- `path`: 目录路径（用逗号分隔路径段，如 `a,b,c`）
+- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
 - `has_layout`: 布尔值（true/false）
 - `has_visual_assets`: 布尔值（true/false）
 - `has_text`: 布尔值（true/false）
 - `has_images`: 布尔值（true/false）
 - `has_subnodes`: 布尔值（true/false）
+
+**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
 
 ## 使用方法
 
@@ -61,16 +63,25 @@ cargo build --release
 
 ## 数据库集成
 
+### 启用 ltree 扩展
+```sql
+CREATE EXTENSION IF NOT EXISTS ltree;
+```
+
 ### 创建表结构
 ```sql
 CREATE TABLE directory_nodes (
-    path TEXT PRIMARY KEY,
+    path ltree PRIMARY KEY,
     has_layout BOOLEAN NOT NULL,
     has_visual_assets BOOLEAN NOT NULL,
     has_text BOOLEAN NOT NULL,
     has_images BOOLEAN NOT NULL,
     has_subnodes BOOLEAN NOT NULL
 );
+
+-- 创建索引以优化查询性能
+CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
+CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
 ```
 
 ### 导入 CSV
@@ -79,6 +90,8 @@ COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
 ```
 
 ### 后端查询示例
+
+#### 基本查询
 ```sql
 -- 查找有排版内容的节点
 SELECT path FROM directory_nodes WHERE has_layout = true;
@@ -86,12 +99,51 @@ SELECT path FROM directory_nodes WHERE has_layout = true;
 -- 查找有图片的节点
 SELECT path FROM directory_nodes WHERE has_images = true;
 
--- 查找有子节点的节点（需要递归查询）
-SELECT path FROM directory_nodes WHERE has_subnodes = true;
-
 -- 查找有完整图文资源的节点
 SELECT path FROM directory_nodes 
 WHERE has_visual_assets = true AND has_text = true AND has_images = true;
+```
+
+#### ltree 树形查询（强大功能）
+```sql
+-- 查找某个节点的所有子节点（后代）
+SELECT * FROM directory_nodes 
+WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
+
+-- 查找某个节点的所有父节点（祖先）
+SELECT * FROM directory_nodes 
+WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
+
+-- 查找某个节点的直接子节点
+SELECT * FROM directory_nodes 
+WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
+
+-- 查找某个节点的所有兄弟节点（同级）
+SELECT * FROM directory_nodes 
+WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
+
+-- 查找路径深度为 2 的所有节点
+SELECT * FROM directory_nodes 
+WHERE nlevel(path) = 2;
+
+-- 查找某个节点的路径长度
+SELECT path, nlevel(path) as depth FROM directory_nodes;
+
+-- 查找某个节点的父路径
+SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
+```
+
+#### 组合查询示例
+```sql
+-- 查找某个节点下所有有图片的子节点
+SELECT * FROM directory_nodes 
+WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
+  AND has_images = true;
+
+-- 查找某个节点的所有有子节点的后代
+SELECT * FROM directory_nodes 
+WHERE path <@ '1_OnceAndOnceAgain' 
+  AND has_subnodes = true;
 ```
 
 ## 文件结构要求

@@ -150,8 +150,8 @@ fn main() -> Result<()> {
         };
         let has_subnodes = check_has_subnodes(p);
 
-        // 生成 CSV 行：路径（逗号分隔）+ 布尔值（true/false）
-        if let Some(path_str) = path_to_csv_line(&rel) {
+        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值（true/false）
+        if let Some(path_str) = path_to_ltree(&rel) {
             writeln!(
                 writer,
                 "{},{},{},{},{},{}",
@@ -194,16 +194,41 @@ fn normalize_components(p: &Path) -> Vec<String> {
         .collect()
 }
 
-fn path_to_csv_line(rel: &Path) -> Option<String> {
+/// 将路径转换为 ltree 格式（点号分隔）
+/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
+/// 其他字符会被替换为下划线
+fn path_to_ltree(rel: &Path) -> Option<String> {
     let mut parts = Vec::new();
     for comp in rel.components() {
         if let Component::Normal(os) = comp {
             let s = os.to_str()?;
-            if !s.is_empty() { parts.push(s.to_string()); }
+            if !s.is_empty() {
+                // 清理目录名，使其符合 ltree 格式要求
+                let cleaned = sanitize_ltree_label(s);
+                if !cleaned.is_empty() {
+                    parts.push(cleaned);
+                }
+            }
         }
     }
     if parts.is_empty() { return None; }
-    Some(parts.join(","))
+    Some(parts.join("."))
+}
+
+/// 清理标签，使其符合 ltree 格式要求
+/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
+/// 其他字符会被替换为下划线
+fn sanitize_ltree_label(label: &str) -> String {
+    label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// 检查目录内是否有 layout.md 文件
@@ -257,18 +282,21 @@ fn check_visual_assets_content(dir: &Path) -> (bool, bool) {
     (has_text, has_images)
 }
 
-/// 检查目录内是否有其他目录（排除 visual_assets）
+/// 检查目录内是否有其他目录（排除 visual_assets 和 project_archive）
 fn check_has_subnodes(dir: &Path) -> bool {
     let Ok(entries) = read_dir(dir) else {
         return false;
     };
 
+    // 需要排除的目录名
+    let excluded_dirs: &[&str] = &["visual_assets", "project_archive"];
+
     for entry in entries.flatten() {
         let path = entry.path();
-        // 只检查目录，排除 visual_assets
+        // 只检查目录，排除 visual_assets 和 project_archive
         if path.is_dir() {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name != "visual_assets" {
+                if !excluded_dirs.contains(&name) {
                     return true;
                 }
             }
