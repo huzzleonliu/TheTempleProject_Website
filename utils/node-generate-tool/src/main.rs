@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{read_dir, File},
     io::{BufWriter, Write},
     path::{Component, Path, PathBuf},
 };
@@ -42,6 +42,10 @@ fn main() -> Result<()> {
             .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?,
     );
 
+    // 写入 CSV 表头（PostgreSQL 可直接导入）
+    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
+        .with_context(|| "写入 CSV 表头失败")?;
+
     // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
     // 1) 程序源码目录（编译期确定）
     // 2) 可执行程序所在目录
@@ -72,12 +76,43 @@ fn main() -> Result<()> {
     // 3) 被扫描的根目录
     ignore_files.push(root.join(&args.ignore_file));
 
-    // 依次添加存在的 ignore 文件
-    for p in ignore_files {
+    // 读取并合并所有存在的 ignore 文件内容
+    let mut merged_rules = String::new();
+    let mut loaded_count = 0;
+    for p in &ignore_files {
         if p.exists() {
-            builder.add_ignore(p);
+            if let Ok(content) = std::fs::read_to_string(p) {
+                eprintln!("已加载 ignore 文件: {}", p.display());
+                if !merged_rules.is_empty() {
+                    merged_rules.push('\n');
+                }
+                merged_rules.push_str(&format!("# From: {}\n", p.display()));
+                merged_rules.push_str(&content);
+                merged_rules.push('\n');
+                loaded_count += 1;
+            }
         }
     }
+    
+    if loaded_count == 0 {
+        eprintln!("警告: 未找到任何 ignore 文件");
+    } else {
+        eprintln!("共加载 {} 个 ignore 文件", loaded_count);
+    }
+
+    // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
+    let temp_ignore_path = if !merged_rules.is_empty() {
+        let temp_path = root.join(format!(".{}_merged", args.ignore_file));
+        std::fs::write(&temp_path, merged_rules)
+            .with_context(|| format!("无法创建临时 ignore 文件: {}", temp_path.display()))?;
+        
+        // 使用 add_custom_ignore_filename，这样规则是相对于扫描根目录的
+        builder.add_custom_ignore_filename(&format!(".{}_merged", args.ignore_file));
+        
+        Some(temp_path)
+    } else {
+        None
+    };
 
     let walker = builder.build();
 
@@ -99,18 +134,45 @@ fn main() -> Result<()> {
         // 跳过根目录自身
         if same_path(p, &root) { continue; }
 
-        // 计算相对路径并写入 CSV（用逗号分隔路径段）
+        // 计算相对路径
         let rel = match pathdiff::diff_paths(p, &root) {
             Some(r) => r,
             None => continue,
         };
 
-        if let Some(line) = path_to_csv_line(&rel) {
-            writeln!(writer, "{}", line).with_context(|| "写入 CSV 失败")?;
+        // 检查目录节点的各种属性
+        let has_layout = check_has_layout(p);
+        let has_visual_assets = check_has_visual_assets(p);
+        let (has_text, has_images) = if has_visual_assets {
+            check_visual_assets_content(p)
+        } else {
+            (false, false)
+        };
+        let has_subnodes = check_has_subnodes(p);
+
+        // 生成 CSV 行：路径（逗号分隔）+ 布尔值（true/false）
+        if let Some(path_str) = path_to_csv_line(&rel) {
+            writeln!(
+                writer,
+                "{},{},{},{},{},{}",
+                path_str,
+                has_layout,
+                has_visual_assets,
+                has_text,
+                has_images,
+                has_subnodes
+            )
+            .with_context(|| "写入 CSV 失败")?;
         }
     }
 
     writer.flush().ok();
+    
+    // 清理临时 ignore 文件
+    if let Some(temp_path) = temp_ignore_path {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    
     println!("已生成: {}", output_path.display());
     Ok(())
 }
@@ -142,4 +204,76 @@ fn path_to_csv_line(rel: &Path) -> Option<String> {
     }
     if parts.is_empty() { return None; }
     Some(parts.join(","))
+}
+
+/// 检查目录内是否有 layout.md 文件
+fn check_has_layout(dir: &Path) -> bool {
+    dir.join("layout.md").is_file()
+}
+
+/// 检查目录内是否有 visual_assets 目录
+fn check_has_visual_assets(dir: &Path) -> bool {
+    dir.join("visual_assets").is_dir()
+}
+
+/// 检查 visual_assets 目录下的内容
+/// 返回 (has_text, has_images)
+fn check_visual_assets_content(dir: &Path) -> (bool, bool) {
+    let va_dir = dir.join("visual_assets");
+    if !va_dir.is_dir() {
+        return (false, false);
+    }
+
+    let Ok(entries) = read_dir(&va_dir) else {
+        return (false, false);
+    };
+
+    let mut has_text = false;
+    let mut has_images = false;
+
+    // 常见图片扩展名
+    let image_exts: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"];
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            // 检查 markdown 文件
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
+                    has_text = true;
+                }
+                // 检查图片文件
+                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
+                    has_images = true;
+                }
+            }
+        }
+        // 如果已经找到两者，可以提前退出
+        if has_text && has_images {
+            break;
+        }
+    }
+
+    (has_text, has_images)
+}
+
+/// 检查目录内是否有其他目录（排除 visual_assets）
+fn check_has_subnodes(dir: &Path) -> bool {
+    let Ok(entries) = read_dir(dir) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // 只检查目录，排除 visual_assets
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name != "visual_assets" {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
