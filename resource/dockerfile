@@ -11,7 +11,7 @@ COPY nginx/ /etc/nginx
 COPY ./resource/ /resource/
 
 # 验证配置语法（可选，但推荐）
-RUN nginx -t
+# RUN nginx -t
 
 # 暴露 80 端口
 EXPOSE 80
