@@ -19,20 +19,14 @@ struct DirectoriesResponse {
 }
 
 #[component]
-pub fn Preview(
-    selected_path: ReadSignal<Option<String>>,
-    first_directory: ReadSignal<Option<String>>,
-) -> impl IntoView {
+pub fn Preview(preview_path: ReadSignal<Option<String>>) -> impl IntoView {
     let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
     let (loading, set_loading) = signal(false);
     let (error, set_error) = signal::<Option<String>>(None);
 
-    // 当 selected_path 改变时，获取子目录
+    // 当 preview_path 改变时，获取子目录
     create_effect(move |_| {
-        // 优先使用选中的路径，如果没有则使用第一个目录
-        let path_to_use = selected_path.get().or_else(|| first_directory.get());
-        
-        if let Some(path) = path_to_use {
+        if let Some(path) = preview_path.get() {
             let path_clone = path.clone();
             spawn_local(async move {
                 set_loading.set(true);
@@ -79,7 +73,7 @@ pub fn Preview(
                                     <Show
                                         when=move || !directories.get().is_empty()
                                         fallback=move || {
-                                            view! { <div><p>"请选择一个目录"</p></div> }
+                                            view! { <div><p>"该目录没有子节点"</p></div> }
                                         }
                                     >
                                         <div>

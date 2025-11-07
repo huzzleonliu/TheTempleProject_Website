@@ -6,10 +6,14 @@ use leptos::prelude::*;
 
 #[component]
 pub fn Home() -> impl IntoView {
-    // 管理选中的目录路径（初始为空，表示根目录）
+    // OverviewA 显示的目录列表（上一级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewB 显示的目录列表（当前节点的兄弟节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（被点击的节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // 当前选中的路径（用于高亮显示）
     let (selected_path, set_selected_path) = signal::<Option<String>>(None);
-    // 管理 OverviewB 的第一个目录（用于 Preview 初始显示）
-    let (first_directory, set_first_directory) = signal::<Option<String>>(None);
 
     view! {
         <div class="grid grid-cols-10 gap-1 h-screen p-4">
@@ -17,13 +21,28 @@ pub fn Home() -> impl IntoView {
                 <Title/>
             </div>
             <div class="col-span-2 overflow-y-auto">
-                <OverviewA />
+                <OverviewA 
+                    overview_a_directories=overview_a_directories
+                    set_selected_path=set_selected_path
+                    set_overview_b_directories=set_overview_b_directories
+                    set_overview_a_directories=set_overview_a_directories
+                    set_preview_path=set_preview_path
+                />
             </div>
             <div class="col-span-3 overflow-y-auto">
-                <OverviewB selected_path=set_selected_path first_directory=set_first_directory/>
+                <OverviewB 
+                    overview_b_directories=overview_b_directories
+                    set_overview_b_directories=set_overview_b_directories
+                    set_overview_a_directories=set_overview_a_directories
+                    selected_path=selected_path
+                    set_selected_path=set_selected_path
+                    set_preview_path=set_preview_path
+                />
             </div>
             <div class="col-span-5 overflow-y-auto">
-                <Preview selected_path=selected_path first_directory=first_directory/>
+                <Preview 
+                    preview_path=preview_path
+                />
             </div>
         </div>
     }
