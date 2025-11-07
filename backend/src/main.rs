@@ -1,3 +1,4 @@
+use crate::database_ctl::directory::{api_get_child_directories, api_get_root_directories};
 use crate::database_ctl::request_test::list_tables;
 use crate::return_code::print_code;
 use axum::{routing::get, Extension, Router};
@@ -26,6 +27,10 @@ async fn main() {
         .route("/print", get(print_code))
         //用于测试后端和数据库沟通
         .route("/tables", get(list_tables))
+        //获取一级目录
+        .route("/directories/root", get(api_get_root_directories))
+        //获取子目录（路径需要 URL 编码）
+        .route("/directories/children/:path", get(api_get_child_directories))
         //加入数据库连接池
         .layer(Extension(pool))
         // 设置 CORS
