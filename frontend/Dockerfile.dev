@@ -3,8 +3,9 @@
 FROM rust:latest 
 
 # Install Node.js and npm
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+RUN . ~/.bashrc && nvm install 24
 
 # Install Trunk
 RUN cargo install trunk

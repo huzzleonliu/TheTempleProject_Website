@@ -22,7 +22,7 @@ pub struct DirectoryNode {
 pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
     let rows = sqlx::query(
         r#"
-        SELECT path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
+        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
         FROM directories
         WHERE nlevel(path) = 1
         ORDER BY path;
@@ -48,15 +48,18 @@ pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
 
 /// 获取指定路径的直接子目录
 pub async fn get_child_directories(pool: &PgPool, parent_path: &str) -> Result<Vec<DirectoryNode>> {
+    // 构建 lquery 模式：parent_path.*{1} 表示匹配 parent_path 的直接子节点（深度为 1）
+    let lquery_pattern = format!("{}.*{{1}}", parent_path);
+    
     let rows = sqlx::query(
         r#"
-        SELECT path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
+        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
         FROM directories
-        WHERE path ~ ($1::ltree || '.*{1}'::lquery)
+        WHERE path ~ $1::lquery
         ORDER BY path;
         "#,
     )
-    .bind(parent_path)
+    .bind(&lquery_pattern)
     .fetch_all(pool)
     .await?;
 
