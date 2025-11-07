@@ -143,14 +143,14 @@ fn main() -> Result<()> {
         // 检查目录节点的各种属性
         let has_layout = check_has_layout(p);
         let has_visual_assets = check_has_visual_assets(p);
-        let (has_text, has_images) = if has_visual_assets {
+        let (text_count, image_count) = if has_visual_assets {
             check_visual_assets_content(p)
         } else {
-            (false, false)
+            (0, 0)
         };
         let has_subnodes = check_has_subnodes(p);
 
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值（true/false）
+        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值/整数
         if let Some(path_str) = path_to_ltree(&rel) {
             writeln!(
                 writer,
@@ -158,8 +158,8 @@ fn main() -> Result<()> {
                 path_str,
                 has_layout,
                 has_visual_assets,
-                has_text,
-                has_images,
+                text_count,
+                image_count,
                 has_subnodes
             )
             .with_context(|| "写入 CSV 失败")?;
@@ -242,44 +242,42 @@ fn check_has_visual_assets(dir: &Path) -> bool {
 }
 
 /// 检查 visual_assets 目录下的内容
-/// 返回 (has_text, has_images)
-fn check_visual_assets_content(dir: &Path) -> (bool, bool) {
+/// 返回 (text_count, image_count)
+/// text_count: .md 文件的数量
+/// image_count: .png、.webp、.jpg 文件的总数
+fn check_visual_assets_content(dir: &Path) -> (u32, u32) {
     let va_dir = dir.join("visual_assets");
     if !va_dir.is_dir() {
-        return (false, false);
+        return (0, 0);
     }
 
     let Ok(entries) = read_dir(&va_dir) else {
-        return (false, false);
+        return (0, 0);
     };
 
-    let mut has_text = false;
-    let mut has_images = false;
+    let mut text_count = 0u32;
+    let mut image_count = 0u32;
 
-    // 常见图片扩展名
-    let image_exts: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"];
+    // 只统计 png、webp、jpg 图片文件
+    let image_exts: &[&str] = &["png", "webp", "jpg", "jpeg"];
 
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() {
-            // 检查 markdown 文件
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                // 统计 markdown 文件
                 if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    has_text = true;
+                    text_count += 1;
                 }
-                // 检查图片文件
+                // 统计图片文件（只统计 png、webp、jpg）
                 if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    has_images = true;
+                    image_count += 1;
                 }
             }
         }
-        // 如果已经找到两者，可以提前退出
-        if has_text && has_images {
-            break;
-        }
     }
 
-    (has_text, has_images)
+    (text_count, image_count)
 }
 
 /// 检查目录内是否有其他目录（排除 visual_assets 和 project_archive）

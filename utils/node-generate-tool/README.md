@@ -19,8 +19,8 @@
 
 - **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
 - **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下是否有 markdown 文件（说明节点内有文字说明）
-- **has_images**: `visual_assets` 目录下是否有图片文件（说明节点内有图片）
+- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
+- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
 - **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
 
 ### 3. CSV 输出格式
@@ -28,8 +28,8 @@
 - `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
 - `has_layout`: 布尔值（true/false）
 - `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 布尔值（true/false）
-- `has_images`: 布尔值（true/false）
+- `has_text`: 非负整数（`.md` 文件的数量，0 表示没有）
+- `has_images`: 非负整数（`.png`、`.webp`、`.jpg` 文件的总数，0 表示没有）
 - `has_subnodes`: 布尔值（true/false）
 
 **注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
@@ -74,8 +74,8 @@ CREATE TABLE directory_nodes (
     path ltree PRIMARY KEY,
     has_layout BOOLEAN NOT NULL,
     has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
+    has_text INTEGER NOT NULL,
+    has_images INTEGER NOT NULL,
     has_subnodes BOOLEAN NOT NULL
 );
 
@@ -96,12 +96,15 @@ COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
 -- 查找有排版内容的节点
 SELECT path FROM directory_nodes WHERE has_layout = true;
 
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
+-- 查找有图片的节点（图片数量大于 0）
+SELECT path FROM directory_nodes WHERE has_images > 0;
 
--- 查找有完整图文资源的节点
+-- 查找有多个图片的节点（图片数量大于等于 5）
+SELECT path FROM directory_nodes WHERE has_images >= 5;
+
+-- 查找有完整图文资源的节点（有文字说明和图片）
 SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
+WHERE has_visual_assets = true AND has_text > 0 AND has_images > 0;
 ```
 
 #### ltree 树形查询（强大功能）
@@ -138,7 +141,7 @@ SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
 -- 查找某个节点下所有有图片的子节点
 SELECT * FROM directory_nodes 
 WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
+  AND has_images > 0;
 
 -- 查找某个节点的所有有子节点的后代
 SELECT * FROM directory_nodes 
