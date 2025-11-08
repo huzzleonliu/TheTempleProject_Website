@@ -16,13 +16,16 @@ pub fn Home() -> impl IntoView {
     let (selected_path, set_selected_path) = signal::<Option<String>>(None);
     // OverviewB 中当前选中的索引（用于键盘导航）
     let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
 
     view! {
-        <div class="grid grid-cols-10 gap-1 h-screen p-4">
-            <div class="col-span-10">
+        <div class="grid grid-cols-10 h-screen items-start">
+            <div class="col-span-10 px-4 pt-4 pb-0">
                 <Title/>
             </div>
-            <div class="col-span-2 overflow-y-auto">
+            <div class="col-span-2 overflow-y-auto px-4 pt-0">
                 <OverviewA 
                     overview_a_directories=overview_a_directories
                     set_selected_path=set_selected_path
@@ -31,7 +34,7 @@ pub fn Home() -> impl IntoView {
                     set_preview_path=set_preview_path
                 />
             </div>
-            <div class="col-span-3 overflow-y-auto">
+            <div class="col-span-3 overflow-y-auto px-4 pt-0">
                 <OverviewB 
                     overview_b_directories=overview_b_directories
                     set_overview_b_directories=set_overview_b_directories
@@ -42,11 +45,13 @@ pub fn Home() -> impl IntoView {
                     selected_index=selected_index
                     set_selected_index=set_selected_index
                     overview_a_directories=overview_a_directories
+                    preview_scroll_ref=preview_scroll_ref
                 />
             </div>
-            <div class="col-span-5 overflow-y-auto">
+            <div class="col-span-5 h-full px-4 pt-0">
                 <Preview 
                     preview_path=preview_path
+                    scroll_container_ref=preview_scroll_ref
                 />
             </div>
         </div>

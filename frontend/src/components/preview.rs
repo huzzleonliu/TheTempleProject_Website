@@ -19,7 +19,10 @@ struct DirectoriesResponse {
 }
 
 #[component]
-pub fn Preview(preview_path: ReadSignal<Option<String>>) -> impl IntoView {
+pub fn Preview(
+    preview_path: ReadSignal<Option<String>>,
+    scroll_container_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
     let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
     let (loading, set_loading) = signal(false);
     let (error, set_error) = signal::<Option<String>>(None);
@@ -61,7 +64,10 @@ pub fn Preview(preview_path: ReadSignal<Option<String>>) -> impl IntoView {
     });
 
     view! {
-        <div>
+        <div 
+            node_ref=scroll_container_ref
+            class="h-full overflow-y-auto"
+        >
             <Show
                 when=move || loading.get()
                 fallback=move || {
@@ -84,12 +90,12 @@ pub fn Preview(preview_path: ReadSignal<Option<String>>) -> impl IntoView {
                                                     let display_name = dir.path.split('.').last().unwrap_or(&dir.path).to_string();
                                                     view! {
                                                         <div class="text-2xl text-gray-500 hover:text-white hover:bg-gray-800">
-                                                            <span>"· "</span>
-                                                            <span>{display_name}</span>
+                                                            {display_name}
                                                         </div>
                                                     }
                                                 }
                                             />
+                                            <div style="height: 50vh;"></div>
                                         </div>
                                     </Show>
                                 }

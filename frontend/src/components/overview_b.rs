@@ -31,16 +31,17 @@ pub fn OverviewB(
     selected_index: ReadSignal<Option<usize>>,
     set_selected_index: WriteSignal<Option<usize>>,
     overview_a_directories: ReadSignal<Vec<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
     let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
     let (loading, set_loading) = signal(false);
     let (error, set_error) = signal::<Option<String>>(None);
 
-    // 当 directories 改变时，重置选中索引为 0
+    // 当 directories 改变时，如果索引未设置，则重置为 0
     create_effect(move |_| {
         let dirs = directories.get();
         if !dirs.is_empty() {
-            // 如果当前索引超出范围，重置为 0
+            // 如果当前索引超出范围或未设置，则重置为 0
             if let Some(current_idx) = selected_index.get() {
                 if current_idx >= dirs.len() {
                     set_selected_index.set(Some(0));
@@ -72,9 +73,44 @@ pub fn OverviewB(
     // 键盘事件处理函数
     let handle_keydown = move |event: KeyboardEvent| {
         let key = event.key();
+        let shift_pressed = event.shift_key();
         let dirs = directories.get();
         
-        // 只处理 j/k/l/h 键
+        // 处理 Shift+J 和 Shift+K 滚动 Preview
+        if shift_pressed {
+            match key.as_str() {
+                "J" | "j" => {
+                    // Shift+J: 向下滚动 Preview
+                    event.prevent_default();
+                    event.stop_propagation();
+                    
+                    if let Some(container) = preview_scroll_ref.get() {
+                        let scroll_amount = 100.0; // 每次滚动 100px
+                        let current_scroll = container.scroll_top() as f64;
+                        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+                        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+                        container.set_scroll_top(new_scroll as i32);
+                    }
+                    return;
+                }
+                "K" | "k" => {
+                    // Shift+K: 向上滚动 Preview
+                    event.prevent_default();
+                    event.stop_propagation();
+                    
+                    if let Some(container) = preview_scroll_ref.get() {
+                        let scroll_amount = 100.0; // 每次滚动 100px
+                        let current_scroll = container.scroll_top() as f64;
+                        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+                        container.set_scroll_top(new_scroll as i32);
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+        
+        // 只处理 j/k/l/h 键（不带 Shift）
         match key.as_str() {
             "j" | "k" | "l" | "h" => {
                 event.prevent_default();
@@ -141,8 +177,8 @@ pub fn OverviewB(
                                                 .map(|d| d.path.clone())
                                                 .collect();
                                             set_overview_b_directories.set(dir_paths);
-                                            // 重置选中索引
-                                            set_selected_index.set(Some(0));
+                                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                                            set_selected_index.set(None);
                                         }
                                         Err(_) => {}
                                     }
@@ -160,6 +196,8 @@ pub fn OverviewB(
                     // 点击 OverviewA 中的最后一个节点
                     if let Some(last_path) = overview_a_dirs.last() {
                         let path_clone = last_path.clone();
+                        // 保存这个路径，用于定位
+                        let path_to_select = path_clone.clone();
                         
                         // 获取父路径（上一级）
                         let parent_path = if path_clone.contains('.') {
@@ -206,6 +244,7 @@ pub fn OverviewB(
                         
                         // 加载兄弟节点到 OverviewB
                         let parent_for_b = parent_path.clone();
+                        let path_to_select_clone = path_to_select.clone();
                         spawn_local(async move {
                             let url = if let Some(p) = parent_for_b {
                                 let encoded_path = urlencoding::encode(&p);
@@ -222,8 +261,17 @@ pub fn OverviewB(
                                                 .map(|d| d.path.clone())
                                                 .collect();
                                             set_overview_b_directories.set(dir_paths);
-                                            // 重置选中索引
-                                            set_selected_index.set(Some(0));
+                                            
+                                            // 直接设置 directories，然后定位到之前选中的节点
+                                            set_directories.set(data.directories.clone());
+                                            
+                                            // 在 directories 设置后，定位到之前选中的节点
+                                            if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                                set_selected_index.set(Some(index));
+                                                set_selected_path.set(Some(path_to_select_clone));
+                                            } else {
+                                                set_selected_index.set(Some(0));
+                                            }
                                         }
                                         Err(_) => {}
                                     }
@@ -504,6 +552,8 @@ pub fn OverviewB(
                                                                                         .map(|d| d.path.clone())
                                                                                         .collect();
                                                                                     set_overview_b_directories.set(dir_paths);
+                                                                                    // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                                                                                    set_selected_index.set(None);
                                                                                 }
                                                                                 Err(_) => {}
                                                                             }
