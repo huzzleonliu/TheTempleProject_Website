@@ -14,6 +14,8 @@ pub fn Home() -> impl IntoView {
     let (preview_path, set_preview_path) = signal::<Option<String>>(None);
     // 当前选中的路径（用于高亮显示）
     let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
 
     view! {
         <div class="grid grid-cols-10 gap-1 h-screen p-4">
@@ -37,6 +39,9 @@ pub fn Home() -> impl IntoView {
                     selected_path=selected_path
                     set_selected_path=set_selected_path
                     set_preview_path=set_preview_path
+                    selected_index=selected_index
+                    set_selected_index=set_selected_index
+                    overview_a_directories=overview_a_directories
                 />
             </div>
             <div class="col-span-5 overflow-y-auto">
