@@ -2,6 +2,7 @@ use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
+use web_sys::console;
 
 /// 目录节点数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,7 @@ struct DirectoriesResponse {
 /// - `has_subnodes`: 节点是否有子节点
 /// - `directories`: 当前目录列表（用于获取完整路径列表）
 /// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
 /// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
 /// - `set_preview_path`: 设置 Preview 显示的路径
 /// - `set_selected_path`: 设置当前选中的路径
@@ -36,35 +38,46 @@ pub fn handle_node_click(
     has_subnodes: bool,
     directories: Vec<DirectoryNode>,
     set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
     set_overview_b_directories: WriteSignal<Vec<String>>,
     set_preview_path: WriteSignal<Option<String>>,
     set_selected_path: WriteSignal<Option<String>>,
     set_selected_index: WriteSignal<Option<usize>>,
 ) {
+    console::log_2(&"[鼠标点击] 路径:".into(), &path.clone().into());
+    console::log_2(&"[鼠标点击] 有子节点:".into(), &has_subnodes.into());
+    
     // 设置选中的路径和索引
     let dirs = directories.clone();
     if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        console::log_2(&"[鼠标点击] 选中索引:".into(), &idx.into());
         set_selected_index.set(Some(idx));
     }
     set_selected_path.set(Some(path.clone()));
     
     // 只有当节点有子节点时才执行跳转
     if has_subnodes {
-        // 将当前 OverviewB 的内容移到 OverviewA
+        console::log_1(&"[鼠标点击] 进入子节点".into());
+        // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
         let current_dirs: Vec<String> = directories
             .iter()
             .map(|d| d.path.clone())
             .collect();
         set_overview_a_directories.set(current_dirs);
         
+        // 高亮 OverviewA 中的当前节点（作为父级）
+        set_overview_a_selected_path.set(Some(path.clone()));
+        
         // 设置 Preview 显示被点击节点的子节点
-        set_preview_path.set(Some(path.clone()));
+        let path_for_preview = path.clone();
+        set_preview_path.set(Some(path_for_preview));
         
         // 加载被点击节点的子目录到 OverviewB
         let path_clone = path.clone();
         spawn_local(async move {
             let encoded_path = urlencoding::encode(&path_clone);
             let url = format!("/api/directories/children/{}", encoded_path);
+            console::log_2(&"[鼠标点击] 请求子节点:".into(), &url.clone().into());
             
             match Request::get(&url).send().await {
                 Ok(resp) => {
@@ -73,18 +86,24 @@ pub fn handle_node_click(
                             let dir_paths: Vec<String> = data.directories.iter()
                                 .map(|d| d.path.clone())
                                 .collect();
+                            console::log_2(&"[鼠标点击] 加载子节点成功，数量:".into(), &data.directories.len().into());
                             set_overview_b_directories.set(dir_paths);
                             // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
                             set_selected_index.set(None);
                         }
-                        Err(_) => {}
+                        Err(e) => {
+                            console::log_2(&"[鼠标点击] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
                     }
                 }
-                Err(_) => {}
+                Err(e) => {
+                    console::log_2(&"[鼠标点击] 请求失败:".into(), &format!("{:?}", e).into());
+                }
             }
         });
     } else {
         // 如果没有子节点，不设置 Preview，也不跳转
+        console::log_1(&"[鼠标点击] 节点没有子节点，不跳转".into());
         set_preview_path.set(None);
     }
 }

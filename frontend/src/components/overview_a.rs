@@ -18,9 +18,16 @@ struct DirectoriesResponse {
     directories: Vec<DirectoryNode>,
 }
 
+/// OverviewA 组件：显示父级节点列表
+/// 
+/// # 功能
+/// - 显示父级节点列表（当前节点的祖先节点）
+/// - 支持高亮显示当前节点的父级
+/// - 支持鼠标点击导航
 #[component]
 pub fn OverviewA(
     overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
     set_selected_path: WriteSignal<Option<String>>,
     set_overview_b_directories: WriteSignal<Vec<String>>,
     set_overview_a_directories: WriteSignal<Vec<String>>,
@@ -68,12 +75,23 @@ pub fn OverviewA(
                 key=|path| path.clone()
                 children=move |path: String| {
                     let path_clone = path.clone();
+                    let path_for_selected = path_clone.clone();
                     let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                    // 判断当前节点是否被选中（用于高亮显示）
+                    let is_selected = move || {
+                        overview_a_selected_path.get().as_ref() == Some(&path_for_selected)
+                    };
                     
                     view! {
                         <li>
                             <button
-                                class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                class=move || {
+                                    if is_selected() {
+                                        "w-full h-full text-left text-white bg-gray-800"
+                                    } else {
+                                        "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                    }
+                                }
                                 on:click=move |_| {
                                     // 获取父路径（上一级）
                                     let parent_path = if path_clone.contains('.') {

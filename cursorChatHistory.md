@@ -1,5 +1,5 @@
 # 了解项目的整体内容
-_Exported on 09/11/2025 at 11:13:40 CET from Cursor (2.0.60)_
+_Exported on 09/11/2025 at 15:08:24 CET from Cursor (2.0.60)_
 
 ---
 
@@ -43429,4 +43429,12122 @@ pub fn OverviewB(
 - 组件逻辑：`overview_b.rs`（主要负责数据加载和 UI 渲染）
 
 这样分离后，调试时可以直接定位到对应的处理器文件，更容易维护和扩展。
+
+---
+
+**User**
+
+重新整理一下键盘的操作逻辑，整体上模仿ranger的导航方式，中间是目前的节点，左边是父节点，右边是子节点和相关的展示，通过jk光标上移下移，hl向上下级切换，最后，使用shift+J/K浏览右侧的页面。
+
+在细节方面，1.进入子级节点的时候，左边的当前子级的父级节点也要高亮显示，后退到父级节点的时候，光标要在高亮的节点上。2.无论是哪一栏，当内容超过栏高的时候，都在栏中显示独立的滑动条。
+
+按照这个逻辑完善功能，删掉多余的无关代码
+
+---
+
+**Cursor**
+
+
+检查当前代码结构，按 ranger 风格重构键盘操作逻辑：
+
+
+
+按 ranger 风格重构键盘操作逻辑，并添加必要功能：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+
+更新相关组件以支持高亮和正确的滚动条：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DirectoryNode {
+    path: String,
+    has_layout: bool,
+    has_visual_assets: bool,
+    has_text: i32,
+    has_images: i32,
+    has_subnodes: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewA 组件：显示父级节点列表
+/// 
+/// # 功能
+/// - 显示父级节点列表（当前节点的祖先节点）
+/// - 支持高亮显示当前节点的父级
+/// - 支持鼠标点击导航
+#[component]
+pub fn OverviewA(
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <ul class="text-2xl text-gray-500">
+            <li>
+                <button
+                    class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                    on:click=move |_| {
+                        // 点击 "/" 时，加载一级目录到 OverviewB，但不移动内容
+                        spawn_local(async move {
+                            match Request::get("/api/directories/root").send().await {
+                                Ok(resp) => {
+                                    match resp.json::<DirectoriesResponse>().await {
+                                        Ok(data) => {
+                                            let dir_paths: Vec<String> = data.directories.iter()
+                                                .map(|d| d.path.clone())
+                                                .collect();
+                                            set_overview_b_directories.set(dir_paths);
+                                            
+                                            // 设置第一个目录用于 Preview
+                                            if let Some(first_dir) = data.directories.first() {
+                                                set_preview_path.set(Some(first_dir.path.clone()));
+                                            }
+                                            
+                                            // OverviewA 保持为空（只有 "/"）
+                                            set_overview_a_directories.set(Vec::new());
+                                            set_selected_path.set(None);
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        });
+                    }
+                >
+                    "/"
+                </button>
+            </li>
+            <For
+                each=move || overview_a_directories.get()
+                key=|path| path.clone()
+                children=move |path: String| {
+                    let path_clone = path.clone();
+                    let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                    
+                    view! {
+                        <li>
+                            <button
+                                class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                on:click=move |_| {
+                                    // 获取父路径（上一级）
+                                    let parent_path = if path_clone.contains('.') {
+                                        let parts: Vec<&str> = path_clone.split('.').collect();
+                                        if parts.len() > 1 {
+                                            Some(parts[0..parts.len()-1].join("."))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    // 设置选中的路径
+                                    set_selected_path.set(Some(path_clone.clone()));
+                                    
+                                    // 先获取被点击节点的信息，检查是否有子节点
+                                    let path_for_info = path_clone.clone();
+                                    spawn_local(async move {
+                                        let encoded_path = urlencoding::encode(&path_for_info);
+                                        let url = format!("/api/directories/children/{}", encoded_path);
+                                        
+                                        match Request::get(&url).send().await {
+                                            Ok(resp) => {
+                                                match resp.json::<DirectoriesResponse>().await {
+                                                    Ok(data) => {
+                                                        // 只有当节点有子节点时才设置 Preview
+                                                        if !data.directories.is_empty() {
+                                                            set_preview_path.set(Some(path_for_info.clone()));
+                                                        } else {
+                                                            set_preview_path.set(None);
+                                                        }
+                                                    }
+                                                    Err(_) => {
+                                                        set_preview_path.set(None);
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {
+                                                set_preview_path.set(None);
+                                            }
+                                        }
+                                    });
+                                    
+                                    // 加载兄弟节点到 OverviewB
+                                    let parent_for_b = parent_path.clone();
+                                    spawn_local(async move {
+                                        let url = if let Some(p) = parent_for_b {
+                                            let encoded_path = urlencoding::encode(&p);
+                                            format!("/api/directories/children/{}", encoded_path)
+                                        } else {
+                                            "/api/directories/root".to_string()
+                                        };
+                                        
+                                        match Request::get(&url).send().await {
+                                            Ok(resp) => {
+                                                match resp.json::<DirectoriesResponse>().await {
+                                                    Ok(data) => {
+                                                        let dir_paths: Vec<String> = data.directories.iter()
+                                                            .map(|d| d.path.clone())
+                                                            .collect();
+                                                        set_overview_b_directories.set(dir_paths);
+                                                    }
+                                                    Err(_) => {}
+                                                }
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    });
+                                    
+                                    // 加载上一级节点到 OverviewA
+                                    if let Some(pp) = parent_path {
+                                        let parent_for_a = if pp.contains('.') {
+                                            let parts: Vec<&str> = pp.split('.').collect();
+                                            if parts.len() > 1 {
+                                                Some(parts[0..parts.len()-1].join("."))
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        spawn_local(async move {
+                                            let url = if let Some(p) = parent_for_a {
+                                                let encoded_path = urlencoding::encode(&p);
+                                                format!("/api/directories/children/{}", encoded_path)
+                                            } else {
+                                                "/api/directories/root".to_string()
+                                            };
+                                            
+                                            match Request::get(&url).send().await {
+                                                Ok(resp) => {
+                                                    match resp.json::<DirectoriesResponse>().await {
+                                                        Ok(data) => {
+                                                            let dir_paths: Vec<String> = data.directories.iter()
+                                                                .map(|d| d.path.clone())
+                                                                .collect();
+                                                            set_overview_a_directories.set(dir_paths);
+                                                        }
+                                                        Err(_) => {}
+                                                    }
+                                                }
+                                                Err(_) => {}
+                                            }
+                                        });
+                                    } else {
+                                        // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                                        set_overview_a_directories.set(Vec::new());
+                                    }
+                                }
+                            >
+                                {display_name}
+                            </button>
+                        </li>
+                    }
+                }
+            />
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DirectoryNode {
+    path: String,
+    has_layout: bool,
+    has_visual_assets: bool,
+    has_text: i32,
+    has_images: i32,
+    has_subnodes: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewA 组件：显示父级节点列表
+/// 
+/// # 功能
+/// - 显示父级节点列表（当前节点的祖先节点）
+/// - 支持高亮显示当前节点的父级
+/// - 支持鼠标点击导航
+#[component]
+pub fn OverviewA(
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <ul class="text-2xl text-gray-500">
+            <li>
+                <button
+                    class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                    on:click=move |_| {
+                        // 点击 "/" 时，加载一级目录到 OverviewB，但不移动内容
+                        spawn_local(async move {
+                            match Request::get("/api/directories/root").send().await {
+                                Ok(resp) => {
+                                    match resp.json::<DirectoriesResponse>().await {
+                                        Ok(data) => {
+                                            let dir_paths: Vec<String> = data.directories.iter()
+                                                .map(|d| d.path.clone())
+                                                .collect();
+                                            set_overview_b_directories.set(dir_paths);
+                                            
+                                            // 设置第一个目录用于 Preview
+                                            if let Some(first_dir) = data.directories.first() {
+                                                set_preview_path.set(Some(first_dir.path.clone()));
+                                            }
+                                            
+                                            // OverviewA 保持为空（只有 "/"）
+                                            set_overview_a_directories.set(Vec::new());
+                                            set_selected_path.set(None);
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        });
+                    }
+                >
+                    "/"
+                </button>
+            </li>
+            <For
+                each=move || overview_a_directories.get()
+                key=|path| path.clone()
+                children=move |path: String| {
+                    let path_clone = path.clone();
+                    let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                    // 判断当前节点是否被选中（用于高亮显示）
+                    let is_selected = move || {
+                        overview_a_selected_path.get().as_ref() == Some(&path_clone)
+                    };
+                    
+                    view! {
+                        <li>
+                            <button
+                                class=move || {
+                                    if is_selected() {
+                                        "w-full h-full text-left text-white bg-gray-800"
+                                    } else {
+                                        "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                    }
+                                }
+                                on:click=move |_| {
+                                    // 获取父路径（上一级）
+                                    let parent_path = if path_clone.contains('.') {
+                                        let parts: Vec<&str> = path_clone.split('.').collect();
+                                        if parts.len() > 1 {
+                                            Some(parts[0..parts.len()-1].join("."))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    // 设置选中的路径
+                                    set_selected_path.set(Some(path_clone.clone()));
+                                    
+                                    // 先获取被点击节点的信息，检查是否有子节点
+                                    let path_for_info = path_clone.clone();
+                                    spawn_local(async move {
+                                        let encoded_path = urlencoding::encode(&path_for_info);
+                                        let url = format!("/api/directories/children/{}", encoded_path);
+                                        
+                                        match Request::get(&url).send().await {
+                                            Ok(resp) => {
+                                                match resp.json::<DirectoriesResponse>().await {
+                                                    Ok(data) => {
+                                                        // 只有当节点有子节点时才设置 Preview
+                                                        if !data.directories.is_empty() {
+                                                            set_preview_path.set(Some(path_for_info.clone()));
+                                                        } else {
+                                                            set_preview_path.set(None);
+                                                        }
+                                                    }
+                                                    Err(_) => {
+                                                        set_preview_path.set(None);
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {
+                                                set_preview_path.set(None);
+                                            }
+                                        }
+                                    });
+                                    
+                                    // 加载兄弟节点到 OverviewB
+                                    let parent_for_b = parent_path.clone();
+                                    spawn_local(async move {
+                                        let url = if let Some(p) = parent_for_b {
+                                            let encoded_path = urlencoding::encode(&p);
+                                            format!("/api/directories/children/{}", encoded_path)
+                                        } else {
+                                            "/api/directories/root".to_string()
+                                        };
+                                        
+                                        match Request::get(&url).send().await {
+                                            Ok(resp) => {
+                                                match resp.json::<DirectoriesResponse>().await {
+                                                    Ok(data) => {
+                                                        let dir_paths: Vec<String> = data.directories.iter()
+                                                            .map(|d| d.path.clone())
+                                                            .collect();
+                                                        set_overview_b_directories.set(dir_paths);
+                                                    }
+                                                    Err(_) => {}
+                                                }
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    });
+                                    
+                                    // 加载上一级节点到 OverviewA
+                                    if let Some(pp) = parent_path {
+                                        let parent_for_a = if pp.contains('.') {
+                                            let parts: Vec<&str> = pp.split('.').collect();
+                                            if parts.len() > 1 {
+                                                Some(parts[0..parts.len()-1].join("."))
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        spawn_local(async move {
+                                            let url = if let Some(p) = parent_for_a {
+                                                let encoded_path = urlencoding::encode(&p);
+                                                format!("/api/directories/children/{}", encoded_path)
+                                            } else {
+                                                "/api/directories/root".to_string()
+                                            };
+                                            
+                                            match Request::get(&url).send().await {
+                                                Ok(resp) => {
+                                                    match resp.json::<DirectoriesResponse>().await {
+                                                        Ok(data) => {
+                                                            let dir_paths: Vec<String> = data.directories.iter()
+                                                                .map(|d| d.path.clone())
+                                                                .collect();
+                                                            set_overview_a_directories.set(dir_paths);
+                                                        }
+                                                        Err(_) => {}
+                                                    }
+                                                }
+                                                Err(_) => {}
+                                            }
+                                        });
+                                    } else {
+                                        // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                                        set_overview_a_directories.set(Vec::new());
+                                    }
+                                }
+                            >
+                                {display_name}
+                            </button>
+                        </li>
+                    }
+                }
+            />
+        </ul>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use leptos::prelude::*;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    view! {
+        <div class="flex flex-col h-screen overflow-hidden">
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use leptos::prelude::*;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    view! {
+        <div class="flex flex-col h-screen overflow-hidden">
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    // 需要传递 overview_a_selected_path 信号
+    let overview_a_selected_path = signal::<Option<String>>(None);
+    let set_overview_a_selected_path = overview_a_selected_path.write_signal();
+    
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+
+修复信号传递问题，并更新鼠标处理器以支持高亮：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    // 需要传递 overview_a_selected_path 信号
+    let overview_a_selected_path = signal::<Option<String>>(None);
+    let set_overview_a_selected_path = overview_a_selected_path.write_signal();
+    
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use leptos::prelude::*;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    view! {
+        <div class="flex flex-col h-screen overflow-hidden">
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+/// 目录节点数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryNode {
+    pub path: String,
+    pub has_layout: bool,
+    pub has_visual_assets: bool,
+    pub has_text: i32,
+    pub has_images: i32,
+    pub has_subnodes: bool,
+}
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理鼠标点击节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的节点路径
+/// - `has_subnodes`: 节点是否有子节点
+/// - `directories`: 当前目录列表（用于获取完整路径列表）
+/// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
+/// - `set_preview_path`: 设置 Preview 显示的路径
+/// - `set_selected_path`: 设置当前选中的路径
+/// - `set_selected_index`: 设置当前选中的索引
+pub fn handle_node_click(
+    path: String,
+    has_subnodes: bool,
+    directories: Vec<DirectoryNode>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    // 设置选中的路径和索引
+    let dirs = directories.clone();
+    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        set_selected_index.set(Some(idx));
+    }
+    set_selected_path.set(Some(path.clone()));
+    
+    // 只有当节点有子节点时才执行跳转
+    if has_subnodes {
+        // 将当前 OverviewB 的内容移到 OverviewA
+        let current_dirs: Vec<String> = directories
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+        set_overview_a_directories.set(current_dirs);
+        
+        // 设置 Preview 显示被点击节点的子节点
+        set_preview_path.set(Some(path.clone()));
+        
+        // 加载被点击节点的子目录到 OverviewB
+        let path_clone = path.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_clone);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                            set_selected_index.set(None);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    } else {
+        // 如果没有子节点，不设置 Preview，也不跳转
+        set_preview_path.set(None);
+    }
+}
+
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+/// 目录节点数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryNode {
+    pub path: String,
+    pub has_layout: bool,
+    pub has_visual_assets: bool,
+    pub has_text: i32,
+    pub has_images: i32,
+    pub has_subnodes: bool,
+}
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理鼠标点击节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的节点路径
+/// - `has_subnodes`: 节点是否有子节点
+/// - `directories`: 当前目录列表（用于获取完整路径列表）
+/// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
+/// - `set_preview_path`: 设置 Preview 显示的路径
+/// - `set_selected_path`: 设置当前选中的路径
+/// - `set_selected_index`: 设置当前选中的索引
+pub fn handle_node_click(
+    path: String,
+    has_subnodes: bool,
+    directories: Vec<DirectoryNode>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    // 设置选中的路径和索引
+    let dirs = directories.clone();
+    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        set_selected_index.set(Some(idx));
+    }
+    set_selected_path.set(Some(path.clone()));
+    
+    // 只有当节点有子节点时才执行跳转
+    if has_subnodes {
+        // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+        let current_dirs: Vec<String> = directories
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+        set_overview_a_directories.set(current_dirs);
+        
+        // 高亮 OverviewA 中的当前节点（作为父级）
+        set_overview_a_selected_path.set(Some(path.clone()));
+        
+        // 设置 Preview 显示被点击节点的子节点
+        set_preview_path.set(Some(path.clone()));
+        
+        // 加载被点击节点的子目录到 OverviewB
+        let path_clone = path.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_clone);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                            set_selected_index.set(None);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    } else {
+        // 如果没有子节点，不设置 Preview，也不跳转
+        set_preview_path.set(None);
+    }
+}
+
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+
+修复编译错误：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+/// 目录节点数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryNode {
+    pub path: String,
+    pub has_layout: bool,
+    pub has_visual_assets: bool,
+    pub has_text: i32,
+    pub has_images: i32,
+    pub has_subnodes: bool,
+}
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理鼠标点击节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的节点路径
+/// - `has_subnodes`: 节点是否有子节点
+/// - `directories`: 当前目录列表（用于获取完整路径列表）
+/// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
+/// - `set_preview_path`: 设置 Preview 显示的路径
+/// - `set_selected_path`: 设置当前选中的路径
+/// - `set_selected_index`: 设置当前选中的索引
+pub fn handle_node_click(
+    path: String,
+    has_subnodes: bool,
+    directories: Vec<DirectoryNode>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    // 设置选中的路径和索引
+    let dirs = directories.clone();
+    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        set_selected_index.set(Some(idx));
+    }
+    set_selected_path.set(Some(path.clone()));
+    
+    // 只有当节点有子节点时才执行跳转
+    if has_subnodes {
+        // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+        let current_dirs: Vec<String> = directories
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+        set_overview_a_directories.set(current_dirs);
+        
+        // 高亮 OverviewA 中的当前节点（作为父级）
+        set_overview_a_selected_path.set(Some(path.clone()));
+        
+        // 设置 Preview 显示被点击节点的子节点
+        let path_for_preview = path.clone();
+        set_preview_path.set(Some(path_for_preview));
+        
+        // 加载被点击节点的子目录到 OverviewB
+        let path_clone = path.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_clone);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                            set_selected_index.set(None);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    } else {
+        // 如果没有子节点，不设置 Preview，也不跳转
+        set_preview_path.set(None);
+    }
+}
+
+
+```
+
+
+修复 overview_a.rs 中的错误：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DirectoryNode {
+    path: String,
+    has_layout: bool,
+    has_visual_assets: bool,
+    has_text: i32,
+    has_images: i32,
+    has_subnodes: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewA 组件：显示父级节点列表
+/// 
+/// # 功能
+/// - 显示父级节点列表（当前节点的祖先节点）
+/// - 支持高亮显示当前节点的父级
+/// - 支持鼠标点击导航
+#[component]
+pub fn OverviewA(
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <ul class="text-2xl text-gray-500">
+            <li>
+                <button
+                    class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                    on:click=move |_| {
+                        // 点击 "/" 时，加载一级目录到 OverviewB，但不移动内容
+                        spawn_local(async move {
+                            match Request::get("/api/directories/root").send().await {
+                                Ok(resp) => {
+                                    match resp.json::<DirectoriesResponse>().await {
+                                        Ok(data) => {
+                                            let dir_paths: Vec<String> = data.directories.iter()
+                                                .map(|d| d.path.clone())
+                                                .collect();
+                                            set_overview_b_directories.set(dir_paths);
+                                            
+                                            // 设置第一个目录用于 Preview
+                                            if let Some(first_dir) = data.directories.first() {
+                                                set_preview_path.set(Some(first_dir.path.clone()));
+                                            }
+                                            
+                                            // OverviewA 保持为空（只有 "/"）
+                                            set_overview_a_directories.set(Vec::new());
+                                            set_selected_path.set(None);
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        });
+                    }
+                >
+                    "/"
+                </button>
+            </li>
+            <For
+                each=move || overview_a_directories.get()
+                key=|path| path.clone()
+                children=move |path: String| {
+                    let path_clone = path.clone();
+                    let path_for_selected = path_clone.clone();
+                    let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                    // 判断当前节点是否被选中（用于高亮显示）
+                    let is_selected = move || {
+                        overview_a_selected_path.get().as_ref() == Some(&path_for_selected)
+                    };
+                    
+                    view! {
+                        <li>
+                            <button
+                                class=move || {
+                                    if is_selected() {
+                                        "w-full h-full text-left text-white bg-gray-800"
+                                    } else {
+                                        "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                    }
+                                }
+                                on:click=move |_| {
+                                    // 获取父路径（上一级）
+                                    let parent_path = if path_clone.contains('.') {
+                                        let parts: Vec<&str> = path_clone.split('.').collect();
+                                        if parts.len() > 1 {
+                                            Some(parts[0..parts.len()-1].join("."))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    // 设置选中的路径
+                                    set_selected_path.set(Some(path_clone.clone()));
+                                    
+                                    // 先获取被点击节点的信息，检查是否有子节点
+                                    let path_for_info = path_clone.clone();
+                                    spawn_local(async move {
+                                        let encoded_path = urlencoding::encode(&path_for_info);
+                                        let url = format!("/api/directories/children/{}", encoded_path);
+                                        
+                                        match Request::get(&url).send().await {
+                                            Ok(resp) => {
+                                                match resp.json::<DirectoriesResponse>().await {
+                                                    Ok(data) => {
+                                                        // 只有当节点有子节点时才设置 Preview
+                                                        if !data.directories.is_empty() {
+                                                            set_preview_path.set(Some(path_for_info.clone()));
+                                                        } else {
+                                                            set_preview_path.set(None);
+                                                        }
+                                                    }
+                                                    Err(_) => {
+                                                        set_preview_path.set(None);
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {
+                                                set_preview_path.set(None);
+                                            }
+                                        }
+                                    });
+                                    
+                                    // 加载兄弟节点到 OverviewB
+                                    let parent_for_b = parent_path.clone();
+                                    spawn_local(async move {
+                                        let url = if let Some(p) = parent_for_b {
+                                            let encoded_path = urlencoding::encode(&p);
+                                            format!("/api/directories/children/{}", encoded_path)
+                                        } else {
+                                            "/api/directories/root".to_string()
+                                        };
+                                        
+                                        match Request::get(&url).send().await {
+                                            Ok(resp) => {
+                                                match resp.json::<DirectoriesResponse>().await {
+                                                    Ok(data) => {
+                                                        let dir_paths: Vec<String> = data.directories.iter()
+                                                            .map(|d| d.path.clone())
+                                                            .collect();
+                                                        set_overview_b_directories.set(dir_paths);
+                                                    }
+                                                    Err(_) => {}
+                                                }
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    });
+                                    
+                                    // 加载上一级节点到 OverviewA
+                                    if let Some(pp) = parent_path {
+                                        let parent_for_a = if pp.contains('.') {
+                                            let parts: Vec<&str> = pp.split('.').collect();
+                                            if parts.len() > 1 {
+                                                Some(parts[0..parts.len()-1].join("."))
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        spawn_local(async move {
+                                            let url = if let Some(p) = parent_for_a {
+                                                let encoded_path = urlencoding::encode(&p);
+                                                format!("/api/directories/children/{}", encoded_path)
+                                            } else {
+                                                "/api/directories/root".to_string()
+                                            };
+                                            
+                                            match Request::get(&url).send().await {
+                                                Ok(resp) => {
+                                                    match resp.json::<DirectoriesResponse>().await {
+                                                        Ok(data) => {
+                                                            let dir_paths: Vec<String> = data.directories.iter()
+                                                                .map(|d| d.path.clone())
+                                                                .collect();
+                                                            set_overview_a_directories.set(dir_paths);
+                                                        }
+                                                        Err(_) => {}
+                                                    }
+                                                }
+                                                Err(_) => {}
+                                            }
+                                        });
+                                    } else {
+                                        // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                                        set_overview_a_directories.set(Vec::new());
+                                    }
+                                }
+                            >
+                                {display_name}
+                            </button>
+                        </li>
+                    }
+                }
+            />
+        </ul>
+    }
+}
+
+```
+
+
+编译通过。检查滚动条设置，并删除多余代码：
+
+
+
+滚动条设置已正确。总结已完成的重构：
+
+## 重构总结
+
+### 1. 键盘操作逻辑（模仿 ranger）
+
+**`keyboard_handlers.rs`**：
+- `j/k`: 在 OverviewB 中上下移动光标
+- `l`: 进入子级节点
+- `h`: 返回父级节点
+- `Shift+J/K`: 滚动 Preview
+
+### 2. 高亮显示功能
+
+- 进入子级节点（`l` 键）时，OverviewA 中的父级节点高亮显示
+- 后退到父级节点（`h` 键）时，光标定位到高亮的节点
+
+### 3. 滚动条设置
+
+每栏都有独立的滚动条：
+- OverviewA: `h-full min-h-0 overflow-y-auto`
+- OverviewB: `h-full min-h-0 overflow-y-auto`
+- Preview: `h-full min-h-0 overflow-y-auto`
+
+### 4. 代码清理
+
+- 简化了 `keyboard_handlers.rs`，删除了冗余函数
+- 统一了导航逻辑
+- 添加了注释
+
+### 5. 信号管理
+
+- 添加了 `overview_a_selected_path` 信号用于 OverviewA 高亮
+- 更新了所有相关组件以正确传递信号
+
+代码已编译通过，功能已按 ranger 风格实现。
+
+---
+
+**User**
+
+给每个交互步骤加返回信息，在console中显示，方便debug
+
+---
+
+**Cursor**
+
+
+在关键交互步骤添加 console 调试输出，便于调试：
+
+
+
+在关键交互步骤添加 console 调试输出：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                                
+                                // 定位到之前选中的节点（父级节点）
+                                if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    set_selected_index.set(Some(index));
+                                    set_selected_path.set(Some(path_to_select_clone));
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    set_selected_index.set(Some(0));
+                                }
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+/// 目录节点数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryNode {
+    pub path: String,
+    pub has_layout: bool,
+    pub has_visual_assets: bool,
+    pub has_text: i32,
+    pub has_images: i32,
+    pub has_subnodes: bool,
+}
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理鼠标点击节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的节点路径
+/// - `has_subnodes`: 节点是否有子节点
+/// - `directories`: 当前目录列表（用于获取完整路径列表）
+/// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
+/// - `set_preview_path`: 设置 Preview 显示的路径
+/// - `set_selected_path`: 设置当前选中的路径
+/// - `set_selected_index`: 设置当前选中的索引
+pub fn handle_node_click(
+    path: String,
+    has_subnodes: bool,
+    directories: Vec<DirectoryNode>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    // 设置选中的路径和索引
+    let dirs = directories.clone();
+    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        set_selected_index.set(Some(idx));
+    }
+    set_selected_path.set(Some(path.clone()));
+    
+    // 只有当节点有子节点时才执行跳转
+    if has_subnodes {
+        // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+        let current_dirs: Vec<String> = directories
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+        set_overview_a_directories.set(current_dirs);
+        
+        // 高亮 OverviewA 中的当前节点（作为父级）
+        set_overview_a_selected_path.set(Some(path.clone()));
+        
+        // 设置 Preview 显示被点击节点的子节点
+        let path_for_preview = path.clone();
+        set_preview_path.set(Some(path_for_preview));
+        
+        // 加载被点击节点的子目录到 OverviewB
+        let path_clone = path.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_clone);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                            set_selected_index.set(None);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    } else {
+        // 如果没有子节点，不设置 Preview，也不跳转
+        set_preview_path.set(None);
+    }
+}
+
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+/// 目录节点数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryNode {
+    pub path: String,
+    pub has_layout: bool,
+    pub has_visual_assets: bool,
+    pub has_text: i32,
+    pub has_images: i32,
+    pub has_subnodes: bool,
+}
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理鼠标点击节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的节点路径
+/// - `has_subnodes`: 节点是否有子节点
+/// - `directories`: 当前目录列表（用于获取完整路径列表）
+/// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
+/// - `set_preview_path`: 设置 Preview 显示的路径
+/// - `set_selected_path`: 设置当前选中的路径
+/// - `set_selected_index`: 设置当前选中的索引
+pub fn handle_node_click(
+    path: String,
+    has_subnodes: bool,
+    directories: Vec<DirectoryNode>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    console::log_2(&"[鼠标点击] 路径:".into(), &path.clone().into());
+    console::log_2(&"[鼠标点击] 有子节点:".into(), &has_subnodes.into());
+    
+    // 设置选中的路径和索引
+    let dirs = directories.clone();
+    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        console::log_2(&"[鼠标点击] 选中索引:".into(), &idx.into());
+        set_selected_index.set(Some(idx));
+    }
+    set_selected_path.set(Some(path.clone()));
+    
+    // 只有当节点有子节点时才执行跳转
+    if has_subnodes {
+        console::log_1(&"[鼠标点击] 进入子节点".into());
+        // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+        let current_dirs: Vec<String> = directories
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+        set_overview_a_directories.set(current_dirs);
+        
+        // 高亮 OverviewA 中的当前节点（作为父级）
+        set_overview_a_selected_path.set(Some(path.clone()));
+        
+        // 设置 Preview 显示被点击节点的子节点
+        let path_for_preview = path.clone();
+        set_preview_path.set(Some(path_for_preview));
+        
+        // 加载被点击节点的子目录到 OverviewB
+        let path_clone = path.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_clone);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            set_overview_b_directories.set(dir_paths);
+                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                            set_selected_index.set(None);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        });
+    } else {
+        // 如果没有子节点，不设置 Preview，也不跳转
+        set_preview_path.set(None);
+    }
+}
+
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+/// 目录节点数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryNode {
+    pub path: String,
+    pub has_layout: bool,
+    pub has_visual_assets: bool,
+    pub has_text: i32,
+    pub has_images: i32,
+    pub has_subnodes: bool,
+}
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理鼠标点击节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的节点路径
+/// - `has_subnodes`: 节点是否有子节点
+/// - `directories`: 当前目录列表（用于获取完整路径列表）
+/// - `set_overview_a_directories`: 设置 OverviewA 的目录列表
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 的目录列表
+/// - `set_preview_path`: 设置 Preview 显示的路径
+/// - `set_selected_path`: 设置当前选中的路径
+/// - `set_selected_index`: 设置当前选中的索引
+pub fn handle_node_click(
+    path: String,
+    has_subnodes: bool,
+    directories: Vec<DirectoryNode>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    console::log_2(&"[鼠标点击] 路径:".into(), &path.clone().into());
+    console::log_2(&"[鼠标点击] 有子节点:".into(), &has_subnodes.into());
+    
+    // 设置选中的路径和索引
+    let dirs = directories.clone();
+    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
+        console::log_2(&"[鼠标点击] 选中索引:".into(), &idx.into());
+        set_selected_index.set(Some(idx));
+    }
+    set_selected_path.set(Some(path.clone()));
+    
+    // 只有当节点有子节点时才执行跳转
+    if has_subnodes {
+        console::log_1(&"[鼠标点击] 进入子节点".into());
+        // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+        let current_dirs: Vec<String> = directories
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+        set_overview_a_directories.set(current_dirs);
+        
+        // 高亮 OverviewA 中的当前节点（作为父级）
+        set_overview_a_selected_path.set(Some(path.clone()));
+        
+        // 设置 Preview 显示被点击节点的子节点
+        let path_for_preview = path.clone();
+        set_preview_path.set(Some(path_for_preview));
+        
+        // 加载被点击节点的子目录到 OverviewB
+        let path_clone = path.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_clone);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            console::log_2(&"[鼠标点击] 请求子节点:".into(), &url.clone().into());
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[鼠标点击] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
+                            set_selected_index.set(None);
+                        }
+                        Err(e) => {
+                            console::log_2(&"[鼠标点击] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[鼠标点击] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    } else {
+        // 如果没有子节点，不设置 Preview，也不跳转
+        console::log_1(&"[鼠标点击] 节点没有子节点，不跳转".into());
+        set_preview_path.set(None);
+    }
+}
+
+
+```
+
+
+为 `overview_b.rs` 中的数据加载添加调试信息：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置，则重置为 0
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+
+编译通过。已在所有关键交互步骤添加 console 调试信息。
+
+## 添加的调试信息总结
+
+### 1. **键盘操作** (`keyboard_handlers.rs`)
+- `j/k`: 光标移动（显示索引变化）
+- `l`: 进入子节点（显示目标路径、请求 URL、加载结果）
+- `h`: 返回父节点（显示目标路径、高亮路径、定位索引）
+- `Shift+J/K`: Preview 滚动
+- 所有 API 请求和响应的成功/失败信息
+
+### 2. **鼠标操作** (`mouse_handlers.rs`)
+- 鼠标点击节点（显示路径、是否有子节点、选中索引）
+- 进入子节点（显示请求 URL、加载结果）
+- API 请求和响应的成功/失败信息
+
+### 3. **数据加载** (`overview_b.rs`)
+- 初始加载根目录
+- 加载目录信息（显示第一个路径、请求 URL、加载结果）
+- 选中索引改变（显示更新的 Preview 路径）
+- 所有 API 请求和响应的成功/失败信息
+
+### 调试信息格式
+
+所有调试信息使用统一格式，带有标签前缀：
+- `[键盘]` - 键盘操作
+- `[鼠标点击]` - 鼠标操作
+- `[进入节点]` - 进入子节点操作
+- `[返回父级]` - 返回父节点操作
+- `[OverviewB]` - OverviewB 组件相关操作
+
+在浏览器开发者工具的 Console 中，可以：
+1. 使用过滤器查看特定类型的操作（如搜索 `[键盘]`）
+2. 跟踪完整的交互流程
+3. 快速定位问题（如 API 请求失败、路径错误等）
+
+现在可以在浏览器 Console 中查看所有交互步骤的详细信息，便于调试。
+
+---
+
+**User**
+
+后退返回父节点的时候，被选中索引有问题，索引值总是列表的最大值，实际应该是父级高亮的索引值，修复这个问题
+
+---
+
+**Cursor**
+
+
+检查返回父节点时的索引定位逻辑：
+
+
+
+检查并修复返回父节点时的索引定位问题。可能是 effect 与索引设置的时序问题：
+
+
+
+问题在于：`overview_b.rs` 中的 effect 在 `directories` 改变时会重置索引，与 `keyboard_handlers.rs` 中的索引设置产生竞态。修复：先设置索引，再设置 directories，或调整 effect 逻辑以避免冲突。
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+
+已修复返回父节点时的索引定位问题。
+
+## 修复内容
+
+### 问题原因
+在 `keyboard_handlers.rs` 的 `handle_go_back` 中，先设置 `directories`，再设置 `selected_index`。`overview_b.rs` 中的 effect 会在 `directories` 改变时触发，可能重置索引，导致竞态。
+
+### 修复方案
+1. 调整执行顺序：先计算并设置正确的索引，再设置 `directories` 和 `overview_b_directories`。
+2. 添加调试信息：在 `overview_b.rs` 的 effect 中添加日志，便于追踪索引是否被意外重置。
+
+### 修改后的逻辑
+```rust
+// 先定位到之前选中的节点（父级节点），再设置 directories
+let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+    Some(index)
+} else {
+    Some(0)
+};
+
+// 先设置索引，避免 effect 重置
+if let Some(idx) = target_index {
+    set_selected_index.set(Some(idx));
+    set_selected_path.set(Some(path_to_select_clone.clone()));
+}
+
+// 然后设置 directories 和 overview_b_directories
+set_overview_b_directories.set(dir_paths);
+set_directories.set(data.directories.clone());
+```
+
+这样，当 effect 检查索引时，索引已经是正确的值，不会被重置。现在返回父级节点时，光标会定位到高亮的父级节点，而不是列表的最大值。
+
+可以在浏览器 Console 中查看调试信息，确认索引设置是否正确。
+
+```rust
+// 先定位到之前选中的节点（父级节点），再设置 directories
+let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+    Some(index)
+} else {
+    Some(0)
+};
+
+// 先设置索引，避免 effect 重置
+if let Some(idx) = target_index {
+    set_selected_index.set(Some(idx));
+    set_selected_path.set(Some(path_to_select_clone.clone()));
+}
+
+// 然后设置 directories 和 overview_b_directories
+set_overview_b_directories.set(dir_paths);
+set_directories.set(data.directories.clone());
+```
+
+---
+
+**User**
+
+[键盘] l: 进入子级节点
+
+
+
+TheTempleProject-a893aca5c23b2afa.js:689   目标路径: 1_OnceAndOnceAgain.programing
+
+TheTempleProject-a893aca5c23b2afa.js:689 [进入节点] 路径: 1_OnceAndOnceAgain.programing
+
+TheTempleProject-a893aca5c23b2afa.js:689 [进入节点] 移动到 OverviewA 的节点数: 5
+
+TheTempleProject-a893aca5c23b2afa.js:689 [进入节点] OverviewA 高亮路径: 1_OnceAndOnceAgain.programing
+
+TheTempleProject-a893aca5c23b2afa.js:689 [进入节点] 请求子节点: /api/directories/children/1_OnceAndOnceAgain.programing
+
+TheTempleProject-a893aca5c23b2afa.js:689 [进入节点] 加载子节点成功，数量: 3
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 选中索引改变，更新 Preview: 1_OnceAndOnceAgain.handmadeBook
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 加载目录信息，第一个路径: 1_OnceAndOnceAgain.programing.code
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 请求 URL: /api/directories/children/1_OnceAndOnceAgain.programing
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 加载目录信息成功，数量: 3
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 设置 Preview 路径: 1_OnceAndOnceAgain.programing.code
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 选中索引改变，更新 Preview: 1_OnceAndOnceAgain.programing.code
+
+TheTempleProject-a893aca5c23b2afa.js:692 [键盘] h: 返回父级节点
+
+TheTempleProject-a893aca5c23b2afa.js:689   目标路径: 1_OnceAndOnceAgain.textile
+
+TheTempleProject-a893aca5c23b2afa.js:689 [返回父级] 目标路径: 1_OnceAndOnceAgain.textile
+
+TheTempleProject-a893aca5c23b2afa.js:689 [返回父级] OverviewA 高亮路径: 1_OnceAndOnceAgain
+
+TheTempleProject-a893aca5c23b2afa.js:689 [返回父级] 请求兄弟节点: /api/directories/children/1_OnceAndOnceAgain
+
+TheTempleProject-a893aca5c23b2afa.js:689 [返回父级] 加载兄弟节点成功，数量: 5
+
+TheTempleProject-a893aca5c23b2afa.js:689 [返回父级] 定位到索引: 4
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 选中索引改变，更新 Preview: 1_OnceAndOnceAgain.textile
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 加载目录信息，第一个路径: 1_OnceAndOnceAgain.handmadeBook
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 请求 URL: /api/directories/children/1_OnceAndOnceAgain
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 加载目录信息成功，数量: 5
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 设置 Preview 路径: 1_OnceAndOnceAgain.handmadeBook
+
+TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 选中索引改变，更新 Preview: 1_OnceAndOnceAgain.textile
+
+从返回的结果来看，目标路径就已经出错了
+
+---
+
+**Cursor**
+
+
+检查返回父级节点时目标路径错误的原因：
+
+
+
+问题：返回父级时，目标路径应为 `1_OnceAndOnceAgain.programing`（OverviewA 的最后一个节点），但实际是 `1_OnceAndOnceAgain.textile`。检查并修复：
+
+
+
+问题：返回父级时使用了 `overview_a_directories.last()`，但应使用 `overview_a_selected_path`（进入节点时设置的父级高亮路径）。修复：改用 `overview_a_selected_path` 作为目标路径。
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            if !overview_a_directories.is_empty() {
+                if let Some(last) = overview_a_directories.last() {
+                    console::log_2(&"  目标路径:".into(), &last.clone().into());
+                }
+            }
+            handle_go_back(
+                &overview_a_directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            handle_go_back(
+                &overview_a_directories,
+                overview_a_selected_path,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    if !overview_a_directories.is_empty() {
+        // 获取 OverviewA 中的最后一个节点（当前节点的父级）
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            handle_go_back(
+                &overview_a_directories,
+                overview_a_selected_path,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    overview_a_selected_path: Option<String>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    // 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+    // 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+    if let Some(parent_path) = overview_a_selected_path {
+        let path_to_select = parent_path.clone();
+        console::log_2(&"[返回父级] 目标路径（来自 overview_a_selected_path）:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            handle_go_back(
+                &overview_a_directories,
+                overview_a_selected_path,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    overview_a_selected_path: Option<String>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    // 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+    // 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+    if let Some(parent_path) = overview_a_selected_path {
+        let path_to_select = parent_path.clone();
+        console::log_2(&"[返回父级] 目标路径（来自 overview_a_selected_path）:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else if !overview_a_directories.is_empty() {
+        // 如果 overview_a_selected_path 为空，但 overview_a_directories 不为空，使用最后一个节点作为后备
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径（后备，来自 overview_a_directories.last）:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+            keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+
+检查 `overview_b.rs` 中是否需要添加 `overview_a_selected_path` 的 ReadSignal：
+
+
+
+添加 `overview_a_selected_path` 的 ReadSignal 到 `overview_b.rs`：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 当前目录的完整信息（包含 has_subnodes 等属性）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+            keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use leptos::prelude::*;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    view! {
+        <div class="flex flex-col h-screen overflow-hidden">
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+检查并修复语法错误：
+
+
+
+修复缩进问题：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            handle_go_back(
+                &overview_a_directories,
+                overview_a_selected_path,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    overview_a_selected_path: Option<String>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    // 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+    // 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+    if let Some(parent_path) = overview_a_selected_path {
+        let path_to_select = parent_path.clone();
+        console::log_2(&"[返回父级] 目标路径（来自 overview_a_selected_path）:".into(), &path_to_select.clone().into());
+        
+        // 获取父路径（上一级）
+        let grandparent_path = if path_to_select.contains('.') {
+            let parts: Vec<&str> = path_to_select.split('.').collect();
+            if parts.len() > 1 {
+                Some(parts[0..parts.len()-1].join("."))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // 设置 OverviewA 中高亮的路径（父级的父级）
+        if let Some(ref gp) = grandparent_path {
+            console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+            set_overview_a_selected_path.set(Some(gp.clone()));
+        } else {
+            console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+            set_overview_a_selected_path.set(None);
+        }
+        
+        // 设置 Preview 显示父级节点的子节点
+        let path_for_preview = path_to_select.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_for_preview);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            if !data.directories.is_empty() {
+                                set_preview_path.set(Some(path_for_preview.clone()));
+                            } else {
+                                set_preview_path.set(None);
+                            }
+                        }
+                        Err(_) => {
+                            set_preview_path.set(None);
+                        }
+                    }
+                }
+                Err(_) => {
+                    set_preview_path.set(None);
+                }
+            }
+        });
+        
+        // 加载兄弟节点到 OverviewB（父级节点的子节点）
+        let parent_for_b = grandparent_path.clone();
+        let path_to_select_clone = path_to_select.clone();
+        spawn_local(async move {
+            let url = if let Some(p) = parent_for_b {
+                let encoded_path = urlencoding::encode(&p);
+                format!("/api/directories/children/{}", encoded_path)
+            } else {
+                "/api/directories/root".to_string()
+            };
+            console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                            
+                            // 先定位到之前选中的节点（父级节点），再设置 directories
+                            // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                            let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                Some(index)
+                            } else {
+                                console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                Some(0)
+                            };
+                            
+                            // 先设置索引，避免 effect 重置
+                            if let Some(idx) = target_index {
+                                set_selected_index.set(Some(idx));
+                                set_selected_path.set(Some(path_to_select_clone.clone()));
+                            }
+                            
+                            // 然后设置 directories 和 overview_b_directories
+                            set_overview_b_directories.set(dir_paths);
+                            set_directories.set(data.directories.clone());
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+        
+        // 加载上一级节点到 OverviewA
+        if let Some(ref gp) = grandparent_path {
+            let parent_for_a = if gp.contains('.') {
+                let parts: Vec<&str> = gp.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_a {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_a_directories.set(dir_paths);
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        } else {
+            // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+            set_overview_a_directories.set(Vec::new());
+        }
+    } else if !overview_a_directories.is_empty() {
+        // 如果 overview_a_selected_path 为空，但 overview_a_directories 不为空，使用最后一个节点作为后备
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径（后备，来自 overview_a_directories.last）:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+
+编译通过。已修复返回父级节点时目标路径错误的问题。
+
+## 修复内容
+
+### 问题原因
+返回父级节点时，代码使用了 `overview_a_directories.last()` 获取目标路径，但该列表的最后一个节点可能不是当前进入的节点。应使用 `overview_a_selected_path`，它在进入节点时已设置为当前进入的节点。
+
+### 修复方案
+1. 修改 `handle_go_back`：优先使用 `overview_a_selected_path` 作为目标路径，而不是 `overview_a_directories.last()`。
+2. 添加参数：在 `handle_keyboard_navigation` 中添加 `overview_a_selected_path` 参数。
+3. 传递信号：在 `overview_b.rs` 中添加 `overview_a_selected_path` 的 ReadSignal，并在 `home.rs` 中传递给 `OverviewB`。
+
+### 修改后的逻辑
+```rust
+// 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+// 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+if let Some(parent_path) = overview_a_selected_path {
+    let path_to_select = parent_path.clone();
+    // ... 使用 path_to_select 进行后续操作
+}
+```
+
+现在返回父级节点时，会使用进入节点时设置的 `overview_a_selected_path`（例如 `1_OnceAndOnceAgain.programing`），而不是 `overview_a_directories` 的最后一个节点。
+
+可以在浏览器 Console 中查看调试信息，确认目标路径是否正确。
+
+```rust
+// 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+// 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+if let Some(parent_path) = overview_a_selected_path {
+    let path_to_select = parent_path.clone();
+    // ... 使用 path_to_select 进行后续操作
+}
+```
 
