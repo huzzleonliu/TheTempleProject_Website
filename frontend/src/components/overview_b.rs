@@ -78,9 +78,26 @@ pub fn OverviewB(
     });
 
     // 当选中索引改变时，更新 Preview 显示的内容
+    // 注意：只有当 directories 不为空且与 overview_b_directories 匹配时才更新 Preview
     create_effect(move |_| {
         if let Some(index) = selected_index.get() {
             let dirs = directories.get();
+            let dir_paths = overview_b_directories.get();
+            
+            // 检查 directories 是否为空，或者是否与 overview_b_directories 匹配
+            // 如果不匹配，说明 directories 还在加载中，不应该更新 Preview
+            if dirs.is_empty() {
+                console::log_1(&"[OverviewB] directories 为空，不更新 Preview".into());
+                return;
+            }
+            
+            // 检查 directories 是否与 overview_b_directories 匹配
+            let dirs_paths: Vec<String> = dirs.iter().map(|d| d.path.clone()).collect();
+            if dirs_paths != dir_paths {
+                console::log_1(&"[OverviewB] directories 与 overview_b_directories 不匹配，不更新 Preview".into());
+                return;
+            }
+            
             if let Some(dir) = dirs.get(index) {
                 // 设置选中的路径（用于高亮显示）
                 set_selected_path.set(Some(dir.path.clone()));
@@ -104,6 +121,9 @@ pub fn OverviewB(
     create_effect(move |_| {
         let dir_paths = overview_b_directories.get();
         let dir_paths_clone = dir_paths.clone();
+        
+        // 先清空 directories，避免旧的 directories 触发 Preview 更新
+        set_directories.set(Vec::new());
         
         spawn_local(async move {
             if dir_paths_clone.is_empty() {
@@ -261,13 +281,13 @@ pub fn OverviewB(
                                             };
                                             
                                             view! {
-                                                <li>
+                                                <li class="w-full min-w-0">
                                                     <button
                                                         class=move || {
                                                             if is_selected() {
-                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                                "w-full h-full text-left text-white bg-gray-800 truncate"
                                                             } else {
-                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400 truncate"
                                                             }
                                                         }
                                                         on:click=move |_| {

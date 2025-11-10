@@ -66,7 +66,7 @@ pub fn Preview(
     view! {
         <div 
             node_ref=scroll_container_ref
-            class="h-full overflow-y-auto"
+            class="h-full overflow-y-auto overflow-x-hidden"
         >
             <Show
                 when=move || loading.get()

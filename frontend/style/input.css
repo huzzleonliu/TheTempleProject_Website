@@ -1,34 +1,36 @@
 @import "tailwindcss";
 
-/* 全局滚动条样式 */
+/* Grid 对齐方式 - 防止所有项目拉伸到同一高度 */
 @layer utilities {
-  /* Grid 对齐方式 - 防止所有项目拉伸到同一高度 */
   .items-start {
     align-items: start;
   }
-  
-  /* Webkit浏览器（Chrome/Safari/Edge） */
-  ::-webkit-scrollbar {
-    width: 20px;
-    height: 10px;
-    background-color: #000;
-  }
+}
 
-  ::-webkit-scrollbar-thumb {
-    background: #fff;
-    border: 1px solid #000;  /* 增加方块边界清晰度 */
-    border-radius: 0;
-  }
+/* 全局滚动条样式 - 伪元素不能放在 @layer 中，需要直接定义 */
+/* Webkit浏览器（Chrome/Safari/Edge） */
+*::-webkit-scrollbar {
+  width: 20px;
+  height: 10px;
+  background-color: #000;
+}
 
-  /* Firefox */
-  /*html {*/
-  /*  scrollbar-color: #fff #000;  /* 滑块 | 轨道 */*/
-  /*  scrollbar-width: thin;       /* 保持方块形态 */*/
-  /*}*/
-  
-  /* 可选：针对特定元素 */
-  .custom-scroll {
-    scrollbar-color: #fff #000;
-    scrollbar-width: thin;
-  }
+*::-webkit-scrollbar-track {
+  background-color: #000;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #fff;
+  border: 1px solid #000;  /* 增加方块边界清晰度 */
+  border-radius: 0;
+}
+
+*::-webkit-scrollbar-corner {
+  background-color: #000;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #fff #000;  /* 滑块 | 轨道 */
 }

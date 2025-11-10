@@ -150,7 +150,7 @@ pub fn Home() -> impl IntoView {
                         preview_scroll_ref=preview_scroll_ref
                     />
                 </div>
-                <div class="col-span-5 overflow-y-auto px-4 pt-0">
+                <div class="col-span-5 h-full min-h-0 px-4 pt-0">
                     <Preview
                         preview_path=preview_path
                         scroll_container_ref=preview_scroll_ref

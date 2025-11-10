@@ -3,6 +3,7 @@
 frontend/debug/
 frontend/target/
 frontend/dist/
+frontend/node_modules/
 backend/debug/
 backend/target/
 backend/target/

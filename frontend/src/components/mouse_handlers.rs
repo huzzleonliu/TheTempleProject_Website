@@ -47,12 +47,7 @@ pub fn handle_node_click(
     console::log_2(&"[鼠标点击] 路径:".into(), &path.clone().into());
     console::log_2(&"[鼠标点击] 有子节点:".into(), &has_subnodes.into());
     
-    // 设置选中的路径和索引
-    let dirs = directories.clone();
-    if let Some(idx) = dirs.iter().position(|d| d.path == path) {
-        console::log_2(&"[鼠标点击] 选中索引:".into(), &idx.into());
-        set_selected_index.set(Some(idx));
-    }
+    // 设置选中的路径（用于高亮显示）
     set_selected_path.set(Some(path.clone()));
     
     // 只有当节点有子节点时才执行跳转
@@ -68,12 +63,17 @@ pub fn handle_node_click(
         // 高亮 OverviewA 中的当前节点（作为父级）
         set_overview_a_selected_path.set(Some(path.clone()));
         
-        // 设置 Preview 显示被点击节点的子节点
-        let path_for_preview = path.clone();
-        set_preview_path.set(Some(path_for_preview));
+        // 先清空 Preview 和 selected_index，等待子节点加载完成后再根据 selected_index 更新
+        set_preview_path.set(None);
+        set_selected_index.set(None);
+        
+        // 先清空 directories，避免旧的 directories 触发 Preview 更新
+        // 注意：这里需要传递 set_directories，但 mouse_handlers 没有这个参数
+        // 所以我们需要在 overview_b.rs 中处理这个问题
         
         // 加载被点击节点的子目录到 OverviewB
         let path_clone = path.clone();
+        let set_selected_index_clone = set_selected_index.clone();
         spawn_local(async move {
             let encoded_path = urlencoding::encode(&path_clone);
             let url = format!("/api/directories/children/{}", encoded_path);
@@ -88,8 +88,21 @@ pub fn handle_node_click(
                                 .collect();
                             console::log_2(&"[鼠标点击] 加载子节点成功，数量:".into(), &data.directories.len().into());
                             set_overview_b_directories.set(dir_paths);
-                            // 重置选中索引（会在effect中根据OverviewA的最后一个节点定位）
-                            set_selected_index.set(None);
+                            
+                            // 等待 overview_b.rs 的 effect 加载完新的 directories 后再设置 selected_index
+                            // 使用 request_animation_frame 延迟，确保 directories 已经更新
+                            use wasm_bindgen::prelude::*;
+                            use wasm_bindgen::JsCast;
+                            if let Some(window) = web_sys::window() {
+                                let closure = Closure::once_into_js(move || {
+                                    // 设置 selected_index 为 0，这会触发 overview_b.rs 的 effect 更新 Preview
+                                    set_selected_index_clone.set(Some(0));
+                                });
+                                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                            } else {
+                                // 如果无法使用 request_animation_frame，直接设置
+                                set_selected_index_clone.set(Some(0));
+                            }
                         }
                         Err(e) => {
                             console::log_2(&"[鼠标点击] 解析响应失败:".into(), &format!("{:?}", e).into());

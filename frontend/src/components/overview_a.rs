@@ -39,9 +39,9 @@ pub fn OverviewA(
 ) -> impl IntoView {
     view! {
         <ul class="text-2xl text-gray-500">
-            <li>
+            <li class="w-full min-w-0">
                 <button
-                    class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                    class="w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400 truncate"
                     on:click=move |_| {
                         // 点击 "/" 时，加载一级目录到 OverviewB，但不移动内容
                         spawn_local(async move {
@@ -87,13 +87,13 @@ pub fn OverviewA(
                     };
                     
                     view! {
-                        <li>
+                        <li class="w-full min-w-0">
                             <button
                                 class=move || {
                                     if is_selected() {
-                                        "w-full h-full text-left text-white bg-gray-800"
+                                        "w-full h-full text-left text-white bg-gray-800 truncate"
                                     } else {
-                                        "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                        "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400 truncate"
                                     }
                                 }
                                 on:click=move |_| {
