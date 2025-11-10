@@ -120,8 +120,8 @@ pub fn Home() -> impl IntoView {
             <div class="px-4 pt-4 pb-0 flex-shrink-0">
                 <Title/>
             </div>
-            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
-                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden items-start">
+                <div class="col-span-2 overflow-y-auto px-4 pt-0">
                     <OverviewA
                         overview_a_directories=overview_a_directories
                         overview_a_selected_path=overview_a_selected_path
@@ -129,9 +129,10 @@ pub fn Home() -> impl IntoView {
                         set_overview_b_directories=set_overview_b_directories
                         set_overview_a_directories=set_overview_a_directories
                         set_preview_path=set_preview_path
+                        set_selected_index=set_selected_index
                     />
                 </div>
-                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                <div class="col-span-3 overflow-y-auto px-4 pt-0">
                     <OverviewB
                         overview_b_directories=overview_b_directories
                         set_overview_b_directories=set_overview_b_directories
@@ -149,7 +150,7 @@ pub fn Home() -> impl IntoView {
                         preview_scroll_ref=preview_scroll_ref
                     />
                 </div>
-                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                <div class="col-span-5 overflow-y-auto px-4 pt-0">
                     <Preview
                         preview_path=preview_path
                         scroll_container_ref=preview_scroll_ref

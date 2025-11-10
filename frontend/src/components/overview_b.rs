@@ -176,13 +176,30 @@ pub fn OverviewB(
                                 console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
                                 set_directories.set(data.directories.clone());
                                 
-                                // 设置第一个有子节点的目录用于 Preview
-                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
-                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
-                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                // 如果 selected_index 已设置，立即根据 selected_index 更新 Preview
+                                // 这样可以确保在进入新节点时，Preview 能第一时间刷新
+                                if let Some(index) = selected_index.get() {
+                                    if let Some(dir) = data.directories.get(index) {
+                                        if dir.has_subnodes {
+                                            console::log_2(&"[OverviewB] directories 加载完成，根据 selected_index 更新 Preview:".into(), &dir.path.clone().into());
+                                            set_preview_path.set(Some(dir.path.clone()));
+                                        } else {
+                                            console::log_2(&"[OverviewB] directories 加载完成，节点无子节点:".into(), &dir.path.clone().into());
+                                            set_preview_path.set(None);
+                                        }
+                                    } else {
+                                        console::log_2(&"[OverviewB] selected_index 超出范围，重置 Preview".into(), &index.into());
+                                        set_preview_path.set(None);
+                                    }
                                 } else {
-                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
-                                    set_preview_path.set(None);
+                                    // 如果 selected_index 未设置，设置第一个有子节点的目录用于 Preview
+                                    if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                        console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                        set_preview_path.set(Some(first_dir.path.clone()));
+                                    } else {
+                                        console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                        set_preview_path.set(None);
+                                    }
                                 }
                                 set_loading.set(false);
                             }

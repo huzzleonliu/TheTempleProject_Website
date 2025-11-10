@@ -2,6 +2,11 @@
 
 /* 全局滚动条样式 */
 @layer utilities {
+  /* Grid 对齐方式 - 防止所有项目拉伸到同一高度 */
+  .items-start {
+    align-items: start;
+  }
+  
   /* Webkit浏览器（Chrome/Safari/Edge） */
   ::-webkit-scrollbar {
     width: 20px;
