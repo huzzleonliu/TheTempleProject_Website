@@ -1,6 +1,5 @@
 use gloo_net::http::Request;
 use leptos::prelude::*;
-use leptos::ev::KeyboardEvent;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 use web_sys::console;
@@ -38,7 +37,7 @@ struct DirectoriesResponse {
 /// - `set_directories`: 设置 directories 的函数（用于返回时定位）
 /// - `preview_scroll_ref`: Preview 滚动容器的引用
 pub fn handle_keyboard_navigation(
-    event: KeyboardEvent,
+    event: &web_sys::KeyboardEvent,
     directories: Vec<DirectoryNode>,
     selected_index: Option<usize>,
     overview_a_directories: Vec<String>,

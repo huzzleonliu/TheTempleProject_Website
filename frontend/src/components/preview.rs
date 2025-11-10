@@ -95,7 +95,7 @@ pub fn Preview(
                                                     }
                                                 }
                                             />
-                                            <div style="height: 50vh;"></div>
+                                            // <div style="height: 50vh;"></div>
                                         </div>
                                     </Show>
                                 }

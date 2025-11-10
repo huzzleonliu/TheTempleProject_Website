@@ -1,12 +1,9 @@
 use gloo_net::http::Request;
 use leptos::prelude::*;
-use leptos::ev::KeyboardEvent;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
 use web_sys::console;
 
-use crate::components::keyboard_handlers;
 use crate::components::mouse_handlers::DirectoryNode;
 
 /// API 响应数据结构
@@ -34,6 +31,10 @@ struct DirectoriesResponse {
 /// - `selected_index`: 当前选中的索引（用于键盘导航）
 /// - `set_selected_index`: 设置选中索引的函数
 /// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（用于返回导航）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 高亮路径的函数
+/// - `directories`: 当前目录的完整信息（从外部传入，供全局键盘事件使用）
+/// - `set_directories`: 设置目录信息的函数
 /// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
 #[component]
 pub fn OverviewB(
@@ -48,10 +49,10 @@ pub fn OverviewB(
     overview_a_directories: ReadSignal<Vec<String>>,
     overview_a_selected_path: ReadSignal<Option<String>>,
     set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
     preview_scroll_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
-    // 当前目录的完整信息（包含 has_subnodes 等属性）
-    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
     // 加载状态
     let (loading, set_loading) = signal(false);
     // 错误信息
@@ -96,24 +97,7 @@ pub fn OverviewB(
         }
     });
 
-    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
-    let handle_keydown = move |event: KeyboardEvent| {
-            keyboard_handlers::handle_keyboard_navigation(
-            event,
-            directories.get(),
-            selected_index.get(),
-            overview_a_directories.get(),
-            overview_a_selected_path.get(),
-            set_selected_index,
-            set_selected_path,
-            set_overview_a_selected_path,
-            set_overview_a_directories,
-            set_overview_b_directories,
-            set_preview_path,
-            set_directories,
-            preview_scroll_ref,
-        );
-    };
+    // 键盘事件处理已移至 home.rs 的全局监听器
 
     // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
     // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
@@ -220,41 +204,11 @@ pub fn OverviewB(
         });
     });
 
-    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
-    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
-    let ul_ref = NodeRef::<leptos::html::Ul>::new();
-    
-    // 当 directories 加载完成时，自动聚焦到 ul 元素
-    // 使用 requestAnimationFrame 确保 DOM 已渲染
-    create_effect(move |_| {
-        let dirs = directories.get();
-        if !dirs.is_empty() {
-            // 使用 requestAnimationFrame 确保 DOM 已渲染
-            if let Some(window) = web_sys::window() {
-                let ul_ref_clone = ul_ref.clone();
-                let closure = Closure::once_into_js(move || {
-                    if let Some(ul) = ul_ref_clone.get() {
-                        let _ = ul.focus();
-                    }
-                });
-                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
-            }
-        }
-    });
+    // 自动聚焦逻辑已移除，键盘事件现在在 home.rs 中全局处理
 
     view! {
         <ul 
-            node_ref=ul_ref
-            class="text-2xl text-gray-500 outline-none focus:outline-none"
-            tabindex="0"
-            on:keydown=handle_keydown
-            on:focus=move |_| {
-                // 当元素获得焦点时，确保有选中的索引
-                // 如果没有选中索引且目录列表不为空，则默认选中第一个
-                if selected_index.get().is_none() && !directories.get().is_empty() {
-                    set_selected_index.set(Some(0));
-                }
-            }
+            class="text-2xl text-gray-500 outline-none"
         >
             <Show
                 when=move || loading.get()
