@@ -1,4435 +1,5 @@
 # 了解项目的整体内容
-_Exported on 09/11/2025 at 15:08:24 CET from Cursor (2.0.60)_
-
----
-
-**User**
-
-我想问一下，我的节点的路径用逗号隔开这种方式是不是不好？有更好的方案吗？
-
----
-
-**Cursor**
-
-检查当前实现，评估路径存储方案：
-
-
-用逗号分隔路径存在一些问题。以下是几种更合适的方案：
-
-## 当前方案的问题
-
-1. 目录名包含逗号会冲突：如果目录名本身有逗号（如 `2023,01,01`），会解析错误
-2. 查询不直观：查找子节点或父节点需要字符串操作，效率低
-3. 层级关系不明确：需要解析才能知道路径层级
-
-## 更好的方案
-
-### 方案 1：PostgreSQL 数组类型（推荐）
-
-**优点：**
-- PostgreSQL 原生支持，查询高效
-- 可以轻松查询路径的任意部分
-- 支持数组操作符和函数
-
-**实现：**
-```sql
-CREATE TABLE directory_nodes (
-    path TEXT[] PRIMARY KEY,  -- 使用数组类型
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 查询示例
-SELECT * FROM directory_nodes 
-WHERE path @> ARRAY['1_OnceAndOnceAgain', 'handmadeBook'];
-
--- 查找所有子节点
-SELECT * FROM directory_nodes 
-WHERE path[1:2] = ARRAY['1_OnceAndOnceAgain', 'handmadeBook'];
-```
-
-**CSV 格式：**
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-"{1_OnceAndOnceAgain,handmadeBook,Book}",false,true,false,true,true
-```
-
-### 方案 2：使用 `/` 分隔符（简单改进）
-
-**优点：**
-- 更符合文件系统路径习惯
-- 目录名包含逗号也不会有问题
-- 实现简单，只需修改分隔符
-
-**实现：**
-```sql
-CREATE TABLE directory_nodes (
-    path TEXT PRIMARY KEY,  -- 如: "1_OnceAndOnceAgain/handmadeBook/Book"
-    ...
-);
-
--- 查询示例
-SELECT * FROM directory_nodes 
-WHERE path LIKE '1_OnceAndOnceAgain/handmadeBook/%';
-```
-
-### 方案 3：PostgreSQL ltree 扩展（最强大）
-
-**优点：**
-- 专门为树形结构设计
-- 支持高效的树形查询（祖先、后代、兄弟节点等）
-- 有丰富的操作符
-
-**实现：**
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,  -- 如: "1_OnceAndOnceAgain.handmadeBook.Book"
-    has_layout BOOLEAN NOT NULL,
-    ...
-);
-
--- 查询示例
--- 查找所有子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找父节点
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-```
-
-**CSV 格式：**
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-1_OnceAndOnceAgain.handmadeBook.Book,false,true,false,true,true
-```
-
-### 方案 4：JSON 类型
-
-**优点：**
-- 灵活，可以存储额外信息
-- PostgreSQL 支持 JSON 查询
-
-**实现：**
-```sql
-CREATE TABLE directory_nodes (
-    path JSONB PRIMARY KEY,  -- 如: ["1_OnceAndOnceAgain", "handmadeBook", "Book"]
-    ...
-);
-```
-
-## 我的推荐
-
-推荐方案 1（数组类型）或方案 3（ltree）。
-
-- 如果只需要基本路径查询：用方案 1（数组）
-- 如果需要复杂的树形查询（祖先、后代、层级等）：用方案 3（ltree）
-
-如果选择方案 1，我可以帮你修改代码，将路径输出为 PostgreSQL 数组格式。需要我修改吗？
-
-```sql
-CREATE TABLE directory_nodes (
-    path TEXT[] PRIMARY KEY,  -- 使用数组类型
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 查询示例
-SELECT * FROM directory_nodes 
-WHERE path @> ARRAY['1_OnceAndOnceAgain', 'handmadeBook'];
-
--- 查找所有子节点
-SELECT * FROM directory_nodes 
-WHERE path[1:2] = ARRAY['1_OnceAndOnceAgain', 'handmadeBook'];
-```
-
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-"{1_OnceAndOnceAgain,handmadeBook,Book}",false,true,false,true,true
-```
-
-```sql
-CREATE TABLE directory_nodes (
-    path TEXT PRIMARY KEY,  -- 如: "1_OnceAndOnceAgain/handmadeBook/Book"
-    ...
-);
-
--- 查询示例
-SELECT * FROM directory_nodes 
-WHERE path LIKE '1_OnceAndOnceAgain/handmadeBook/%';
-```
-
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,  -- 如: "1_OnceAndOnceAgain.handmadeBook.Book"
-    has_layout BOOLEAN NOT NULL,
-    ...
-);
-
--- 查询示例
--- 查找所有子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找父节点
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-```
-
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-1_OnceAndOnceAgain.handmadeBook.Book,false,true,false,true,true
-```
-
-```sql
-CREATE TABLE directory_nodes (
-    path JSONB PRIMARY KEY,  -- 如: ["1_OnceAndOnceAgain", "handmadeBook", "Book"]
-    ...
-);
-```
-
----
-
-**User**
-
-帮我使用方案3,使用ltree
-
----
-
-**Cursor**
-
-修改工具以使用 PostgreSQL 的 ltree 扩展。先查看当前代码，然后进行修改。
-
-
-修改工具以使用 PostgreSQL 的 ltree 扩展。先查看路径转换函数：
-
-
-修改代码以使用 ltree 格式：
-
-
-```rust
-use std::{
-    fs::{read_dir, File},
-    io::{BufWriter, Write},
-    path::{Component, Path, PathBuf},
-};
-
-use anyhow::{bail, Context, Result};
-use clap::Parser;
-use ignore::WalkBuilder;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "node-generate-tool", version, about = "生成目录路径 CSV（支持 fileignore，gitignore 语法）")] 
-struct Args {
-    /// 根目录（将从该目录递归遍历子目录）
-    root: PathBuf,
-
-    /// 输出 CSV 文件路径（默认: 当前目录下 directories.csv）
-    #[arg(short = 'o', long = "output")]
-    output: Option<PathBuf>,
-
-    /// 指定 ignore 文件名（默认: fileignore，使用 gitignore 语法）
-    #[arg(long = "ignore-file", default_value = "fileignore")]
-    ignore_file: String,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let root = canonicalize_path(&args.root)
-        .with_context(|| format!("无法解析根目录路径: {}", args.root.display()))?;
-    if !root.is_dir() {
-        bail!("提供的路径不是目录: {}", root.display());
-    }
-
-    let output_path = args
-        .output
-        .unwrap_or_else(|| PathBuf::from("directories.csv"));
-
-    let mut writer = BufWriter::new(
-        File::create(&output_path)
-            .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?,
-    );
-
-    // 写入 CSV 表头（PostgreSQL 可直接导入）
-    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
-        .with_context(|| "写入 CSV 表头失败")?;
-
-    // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
-    // 1) 程序源码目录（编译期确定）
-    // 2) 可执行程序所在目录
-    // 3) 被扫描的根目录
-    // 可通过 --ignore-file 指定文件名，默认 fileignore
-    let mut builder = WalkBuilder::new(&root);
-    builder
-        .hidden(false) // 包含隐藏目录，是否忽略交由规则决定
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false);
-
-    // 收集候选 ignore 文件路径
-    let mut ignore_files: Vec<PathBuf> = Vec::new();
-
-    // 1) 程序源码目录（编译期的 crate 根目录）
-    let program_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    ignore_files.push(program_dir.join(&args.ignore_file));
-
-    // 2) 可执行程序所在目录
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().expect("无法获取当前工作目录"));
-    ignore_files.push(exe_dir.join(&args.ignore_file));
-
-    // 3) 被扫描的根目录
-    ignore_files.push(root.join(&args.ignore_file));
-
-    // 读取并合并所有存在的 ignore 文件内容
-    let mut merged_rules = String::new();
-    let mut loaded_count = 0;
-    for p in &ignore_files {
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                eprintln!("已加载 ignore 文件: {}", p.display());
-                if !merged_rules.is_empty() {
-                    merged_rules.push('\n');
-                }
-                merged_rules.push_str(&format!("# From: {}\n", p.display()));
-                merged_rules.push_str(&content);
-                merged_rules.push('\n');
-                loaded_count += 1;
-            }
-        }
-    }
-    
-    if loaded_count == 0 {
-        eprintln!("警告: 未找到任何 ignore 文件");
-    } else {
-        eprintln!("共加载 {} 个 ignore 文件", loaded_count);
-    }
-
-    // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
-    let temp_ignore_path = if !merged_rules.is_empty() {
-        let temp_path = root.join(format!(".{}_merged", args.ignore_file));
-        std::fs::write(&temp_path, merged_rules)
-            .with_context(|| format!("无法创建临时 ignore 文件: {}", temp_path.display()))?;
-        
-        // 使用 add_custom_ignore_filename，这样规则是相对于扫描根目录的
-        builder.add_custom_ignore_filename(&format!(".{}_merged", args.ignore_file));
-        
-        Some(temp_path)
-    } else {
-        None
-    };
-
-    let walker = builder.build();
-
-    for dent in walker {
-        let dent = match dent {
-            Ok(d) => d,
-            Err(err) => {
-                eprintln!("跳过不可读条目: {err}");
-                continue;
-            }
-        };
-
-        // 仅输出目录
-        let Some(ft) = dent.file_type() else { continue }; 
-        if !ft.is_dir() { continue; }
-
-        let p = dent.path();
-
-        // 跳过根目录自身
-        if same_path(p, &root) { continue; }
-
-        // 计算相对路径
-        let rel = match pathdiff::diff_paths(p, &root) {
-            Some(r) => r,
-            None => continue,
-        };
-
-        // 检查目录节点的各种属性
-        let has_layout = check_has_layout(p);
-        let has_visual_assets = check_has_visual_assets(p);
-        let (has_text, has_images) = if has_visual_assets {
-            check_visual_assets_content(p)
-        } else {
-            (false, false)
-        };
-        let has_subnodes = check_has_subnodes(p);
-
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值（true/false）
-        if let Some(path_str) = path_to_ltree(&rel) {
-            writeln!(
-                writer,
-                "{},{},{},{},{},{}",
-                path_str,
-                has_layout,
-                has_visual_assets,
-                has_text,
-                has_images,
-                has_subnodes
-            )
-            .with_context(|| "写入 CSV 失败")?;
-        }
-    }
-
-    writer.flush().ok();
-    
-    // 清理临时 ignore 文件
-    if let Some(temp_path) = temp_ignore_path {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    
-    println!("已生成: {}", output_path.display());
-    Ok(())
-}
-
-fn canonicalize_path(p: &Path) -> Result<PathBuf> {
-    // 对于不存在但可访问的路径 canonicalize 可能失败，先尝试直接返回绝对路径
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir()?.join(p) };
-    Ok(abs)
-}
-
-fn same_path(a: &Path, b: &Path) -> bool {
-    // 尽量以组件对比，避免大小写/分隔符细节影响（不跨平台处理大小写）
-    normalize_components(a) == normalize_components(b)
-}
-
-fn normalize_components(p: &Path) -> Vec<String> {
-    p.components()
-        .filter_map(|c| match c { Component::Normal(os) => os.to_str().map(|s| s.to_string()), _ => None })
-        .collect()
-}
-
-fn path_to_csv_line(rel: &Path) -> Option<String> {
-    let mut parts = Vec::new();
-    for comp in rel.components() {
-        if let Component::Normal(os) = comp {
-            let s = os.to_str()?;
-            if !s.is_empty() { parts.push(s.to_string()); }
-        }
-    }
-    if parts.is_empty() { return None; }
-    Some(parts.join(","))
-}
-
-/// 检查目录内是否有 layout.md 文件
-fn check_has_layout(dir: &Path) -> bool {
-    dir.join("layout.md").is_file()
-}
-
-/// 检查目录内是否有 visual_assets 目录
-fn check_has_visual_assets(dir: &Path) -> bool {
-    dir.join("visual_assets").is_dir()
-}
-
-/// 检查 visual_assets 目录下的内容
-/// 返回 (has_text, has_images)
-fn check_visual_assets_content(dir: &Path) -> (bool, bool) {
-    let va_dir = dir.join("visual_assets");
-    if !va_dir.is_dir() {
-        return (false, false);
-    }
-
-    let Ok(entries) = read_dir(&va_dir) else {
-        return (false, false);
-    };
-
-    let mut has_text = false;
-    let mut has_images = false;
-
-    // 常见图片扩展名
-    let image_exts: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            // 检查 markdown 文件
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    has_text = true;
-                }
-                // 检查图片文件
-                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    has_images = true;
-                }
-            }
-        }
-        // 如果已经找到两者，可以提前退出
-        if has_text && has_images {
-            break;
-        }
-    }
-
-    (has_text, has_images)
-}
-
-/// 检查目录内是否有其他目录（排除 visual_assets）
-fn check_has_subnodes(dir: &Path) -> bool {
-    let Ok(entries) = read_dir(dir) else {
-        return false;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // 只检查目录，排除 visual_assets
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name != "visual_assets" {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-```
-
-```rust
-use std::{
-    fs::{read_dir, File},
-    io::{BufWriter, Write},
-    path::{Component, Path, PathBuf},
-};
-
-use anyhow::{bail, Context, Result};
-use clap::Parser;
-use ignore::WalkBuilder;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "node-generate-tool", version, about = "生成目录路径 CSV（支持 fileignore，gitignore 语法）")] 
-struct Args {
-    /// 根目录（将从该目录递归遍历子目录）
-    root: PathBuf,
-
-    /// 输出 CSV 文件路径（默认: 当前目录下 directories.csv）
-    #[arg(short = 'o', long = "output")]
-    output: Option<PathBuf>,
-
-    /// 指定 ignore 文件名（默认: fileignore，使用 gitignore 语法）
-    #[arg(long = "ignore-file", default_value = "fileignore")]
-    ignore_file: String,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let root = canonicalize_path(&args.root)
-        .with_context(|| format!("无法解析根目录路径: {}", args.root.display()))?;
-    if !root.is_dir() {
-        bail!("提供的路径不是目录: {}", root.display());
-    }
-
-    let output_path = args
-        .output
-        .unwrap_or_else(|| PathBuf::from("directories.csv"));
-
-    let mut writer = BufWriter::new(
-        File::create(&output_path)
-            .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?,
-    );
-
-    // 写入 CSV 表头（PostgreSQL 可直接导入）
-    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
-        .with_context(|| "写入 CSV 表头失败")?;
-
-    // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
-    // 1) 程序源码目录（编译期确定）
-    // 2) 可执行程序所在目录
-    // 3) 被扫描的根目录
-    // 可通过 --ignore-file 指定文件名，默认 fileignore
-    let mut builder = WalkBuilder::new(&root);
-    builder
-        .hidden(false) // 包含隐藏目录，是否忽略交由规则决定
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false);
-
-    // 收集候选 ignore 文件路径
-    let mut ignore_files: Vec<PathBuf> = Vec::new();
-
-    // 1) 程序源码目录（编译期的 crate 根目录）
-    let program_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    ignore_files.push(program_dir.join(&args.ignore_file));
-
-    // 2) 可执行程序所在目录
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().expect("无法获取当前工作目录"));
-    ignore_files.push(exe_dir.join(&args.ignore_file));
-
-    // 3) 被扫描的根目录
-    ignore_files.push(root.join(&args.ignore_file));
-
-    // 读取并合并所有存在的 ignore 文件内容
-    let mut merged_rules = String::new();
-    let mut loaded_count = 0;
-    for p in &ignore_files {
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                eprintln!("已加载 ignore 文件: {}", p.display());
-                if !merged_rules.is_empty() {
-                    merged_rules.push('\n');
-                }
-                merged_rules.push_str(&format!("# From: {}\n", p.display()));
-                merged_rules.push_str(&content);
-                merged_rules.push('\n');
-                loaded_count += 1;
-            }
-        }
-    }
-    
-    if loaded_count == 0 {
-        eprintln!("警告: 未找到任何 ignore 文件");
-    } else {
-        eprintln!("共加载 {} 个 ignore 文件", loaded_count);
-    }
-
-    // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
-    let temp_ignore_path = if !merged_rules.is_empty() {
-        let temp_path = root.join(format!(".{}_merged", args.ignore_file));
-        std::fs::write(&temp_path, merged_rules)
-            .with_context(|| format!("无法创建临时 ignore 文件: {}", temp_path.display()))?;
-        
-        // 使用 add_custom_ignore_filename，这样规则是相对于扫描根目录的
-        builder.add_custom_ignore_filename(&format!(".{}_merged", args.ignore_file));
-        
-        Some(temp_path)
-    } else {
-        None
-    };
-
-    let walker = builder.build();
-
-    for dent in walker {
-        let dent = match dent {
-            Ok(d) => d,
-            Err(err) => {
-                eprintln!("跳过不可读条目: {err}");
-                continue;
-            }
-        };
-
-        // 仅输出目录
-        let Some(ft) = dent.file_type() else { continue }; 
-        if !ft.is_dir() { continue; }
-
-        let p = dent.path();
-
-        // 跳过根目录自身
-        if same_path(p, &root) { continue; }
-
-        // 计算相对路径
-        let rel = match pathdiff::diff_paths(p, &root) {
-            Some(r) => r,
-            None => continue,
-        };
-
-        // 检查目录节点的各种属性
-        let has_layout = check_has_layout(p);
-        let has_visual_assets = check_has_visual_assets(p);
-        let (has_text, has_images) = if has_visual_assets {
-            check_visual_assets_content(p)
-        } else {
-            (false, false)
-        };
-        let has_subnodes = check_has_subnodes(p);
-
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值（true/false）
-        if let Some(path_str) = path_to_ltree(&rel) {
-            writeln!(
-                writer,
-                "{},{},{},{},{},{}",
-                path_str,
-                has_layout,
-                has_visual_assets,
-                has_text,
-                has_images,
-                has_subnodes
-            )
-            .with_context(|| "写入 CSV 失败")?;
-        }
-    }
-
-    writer.flush().ok();
-    
-    // 清理临时 ignore 文件
-    if let Some(temp_path) = temp_ignore_path {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    
-    println!("已生成: {}", output_path.display());
-    Ok(())
-}
-
-fn canonicalize_path(p: &Path) -> Result<PathBuf> {
-    // 对于不存在但可访问的路径 canonicalize 可能失败，先尝试直接返回绝对路径
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir()?.join(p) };
-    Ok(abs)
-}
-
-fn same_path(a: &Path, b: &Path) -> bool {
-    // 尽量以组件对比，避免大小写/分隔符细节影响（不跨平台处理大小写）
-    normalize_components(a) == normalize_components(b)
-}
-
-fn normalize_components(p: &Path) -> Vec<String> {
-    p.components()
-        .filter_map(|c| match c { Component::Normal(os) => os.to_str().map(|s| s.to_string()), _ => None })
-        .collect()
-}
-
-/// 将路径转换为 ltree 格式（点号分隔）
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn path_to_ltree(rel: &Path) -> Option<String> {
-    let mut parts = Vec::new();
-    for comp in rel.components() {
-        if let Component::Normal(os) = comp {
-            let s = os.to_str()?;
-            if !s.is_empty() {
-                // 清理目录名，使其符合 ltree 格式要求
-                let cleaned = sanitize_ltree_label(s);
-                if !cleaned.is_empty() {
-                    parts.push(cleaned);
-                }
-            }
-        }
-    }
-    if parts.is_empty() { return None; }
-    Some(parts.join("."))
-}
-
-/// 清理标签，使其符合 ltree 格式要求
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn sanitize_ltree_label(label: &str) -> String {
-    label
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// 检查目录内是否有 layout.md 文件
-fn check_has_layout(dir: &Path) -> bool {
-    dir.join("layout.md").is_file()
-}
-
-/// 检查目录内是否有 visual_assets 目录
-fn check_has_visual_assets(dir: &Path) -> bool {
-    dir.join("visual_assets").is_dir()
-}
-
-/// 检查 visual_assets 目录下的内容
-/// 返回 (has_text, has_images)
-fn check_visual_assets_content(dir: &Path) -> (bool, bool) {
-    let va_dir = dir.join("visual_assets");
-    if !va_dir.is_dir() {
-        return (false, false);
-    }
-
-    let Ok(entries) = read_dir(&va_dir) else {
-        return (false, false);
-    };
-
-    let mut has_text = false;
-    let mut has_images = false;
-
-    // 常见图片扩展名
-    let image_exts: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            // 检查 markdown 文件
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    has_text = true;
-                }
-                // 检查图片文件
-                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    has_images = true;
-                }
-            }
-        }
-        // 如果已经找到两者，可以提前退出
-        if has_text && has_images {
-            break;
-        }
-    }
-
-    (has_text, has_images)
-}
-
-/// 检查目录内是否有其他目录（排除 visual_assets）
-fn check_has_subnodes(dir: &Path) -> bool {
-    let Ok(entries) = read_dir(dir) else {
-        return false;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // 只检查目录，排除 visual_assets
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name != "visual_assets" {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-```
-
-更新 README 文档，添加 ltree 使用说明：
-
-
-更新 README 文档，添加 ltree 使用说明：
-
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下是否有 markdown 文件（说明节点内有文字说明）
-- **has_images**: `visual_assets` 目录下是否有图片文件（说明节点内有图片）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 布尔值（true/false）
-- `has_images`: 布尔值（true/false）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path TEXT PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
-
--- 查找有子节点的节点（需要递归查询）
-SELECT path FROM directory_nodes WHERE has_subnodes = true;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下是否有 markdown 文件（说明节点内有文字说明）
-- **has_images**: `visual_assets` 目录下是否有图片文件（说明节点内有图片）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 布尔值（true/false）
-- `has_images`: 布尔值（true/false）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-编译并测试代码：
-
-
-编译成功。更新 TODO 状态：
-
-
-已修改工具以使用 PostgreSQL 的 ltree 扩展。主要改动如下：
-
-## 主要改动
-
-### 1. 路径格式改为 ltree
-- 之前：逗号分隔（如 `a,b,c`）
-- 现在：点号分隔（如 `a.b.c`）
-
-### 2. 特殊字符处理
-- 目录名中的特殊字符会被替换为下划线
-- 符合 ltree 标签要求（只能包含字母、数字、下划线）
-- 例如：`2023-01-01` → `2023_01_01`
-
-### 3. 代码修改
-- 将 `path_to_csv_line` 函数改为 `path_to_ltree`
-- 添加 `sanitize_ltree_label` 函数处理特殊字符
-- 路径输出格式改为点号分隔
-
-### 4. 文档更新
-- 更新 README，添加 ltree 使用说明
-- 包含数据库集成步骤
-- 提供丰富的查询示例（树形查询、祖先/后代查询等）
-
-## 使用示例
-
-生成的 CSV 格式：
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-1_OnceAndOnceAgain.handmadeBook.Book,false,true,false,true,true
-```
-
-数据库查询示例：
-```sql
--- 启用扩展
-CREATE EXTENSION IF NOT EXISTS ltree;
-
--- 创建表
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 查找所有子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-```
-
-工具已编译完成，可以直接使用。重新运行工具生成的 CSV 文件将使用 ltree 格式，可以直接导入 PostgreSQL 数据库。
-
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-1_OnceAndOnceAgain.handmadeBook.Book,false,true,false,true,true
-```
-
-```sql
--- 启用扩展
-CREATE EXTENSION IF NOT EXISTS ltree;
-
--- 创建表
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 查找所有子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-```
-
----
-
-**User**
-
-需要更正一个逻辑，“节点内有其它目录的话，说明节点内有子节点”这里的其他目录不包括“visual_assets”和“project_archive”目录
-
----
-
-**Cursor**
-
-修改 `check_has_subnodes` 函数，排除 `visual_assets` 和 `project_archive` 目录。
-
-
-更新 `check_has_subnodes`，同时排除 `visual_assets` 和 `project_archive`。
-
-
-```rust
-use std::{
-    fs::{read_dir, File},
-    io::{BufWriter, Write},
-    path::{Component, Path, PathBuf},
-};
-
-use anyhow::{bail, Context, Result};
-use clap::Parser;
-use ignore::WalkBuilder;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "node-generate-tool", version, about = "生成目录路径 CSV（支持 fileignore，gitignore 语法）")] 
-struct Args {
-    /// 根目录（将从该目录递归遍历子目录）
-    root: PathBuf,
-
-    /// 输出 CSV 文件路径（默认: 当前目录下 directories.csv）
-    #[arg(short = 'o', long = "output")]
-    output: Option<PathBuf>,
-
-    /// 指定 ignore 文件名（默认: fileignore，使用 gitignore 语法）
-    #[arg(long = "ignore-file", default_value = "fileignore")]
-    ignore_file: String,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let root = canonicalize_path(&args.root)
-        .with_context(|| format!("无法解析根目录路径: {}", args.root.display()))?;
-    if !root.is_dir() {
-        bail!("提供的路径不是目录: {}", root.display());
-    }
-
-    let output_path = args
-        .output
-        .unwrap_or_else(|| PathBuf::from("directories.csv"));
-
-    let mut writer = BufWriter::new(
-        File::create(&output_path)
-            .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?,
-    );
-
-    // 写入 CSV 表头（PostgreSQL 可直接导入）
-    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
-        .with_context(|| "写入 CSV 表头失败")?;
-
-    // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
-    // 1) 程序源码目录（编译期确定）
-    // 2) 可执行程序所在目录
-    // 3) 被扫描的根目录
-    // 可通过 --ignore-file 指定文件名，默认 fileignore
-    let mut builder = WalkBuilder::new(&root);
-    builder
-        .hidden(false) // 包含隐藏目录，是否忽略交由规则决定
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false);
-
-    // 收集候选 ignore 文件路径
-    let mut ignore_files: Vec<PathBuf> = Vec::new();
-
-    // 1) 程序源码目录（编译期的 crate 根目录）
-    let program_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    ignore_files.push(program_dir.join(&args.ignore_file));
-
-    // 2) 可执行程序所在目录
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().expect("无法获取当前工作目录"));
-    ignore_files.push(exe_dir.join(&args.ignore_file));
-
-    // 3) 被扫描的根目录
-    ignore_files.push(root.join(&args.ignore_file));
-
-    // 读取并合并所有存在的 ignore 文件内容
-    let mut merged_rules = String::new();
-    let mut loaded_count = 0;
-    for p in &ignore_files {
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                eprintln!("已加载 ignore 文件: {}", p.display());
-                if !merged_rules.is_empty() {
-                    merged_rules.push('\n');
-                }
-                merged_rules.push_str(&format!("# From: {}\n", p.display()));
-                merged_rules.push_str(&content);
-                merged_rules.push('\n');
-                loaded_count += 1;
-            }
-        }
-    }
-    
-    if loaded_count == 0 {
-        eprintln!("警告: 未找到任何 ignore 文件");
-    } else {
-        eprintln!("共加载 {} 个 ignore 文件", loaded_count);
-    }
-
-    // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
-    let temp_ignore_path = if !merged_rules.is_empty() {
-        let temp_path = root.join(format!(".{}_merged", args.ignore_file));
-        std::fs::write(&temp_path, merged_rules)
-            .with_context(|| format!("无法创建临时 ignore 文件: {}", temp_path.display()))?;
-        
-        // 使用 add_custom_ignore_filename，这样规则是相对于扫描根目录的
-        builder.add_custom_ignore_filename(&format!(".{}_merged", args.ignore_file));
-        
-        Some(temp_path)
-    } else {
-        None
-    };
-
-    let walker = builder.build();
-
-    for dent in walker {
-        let dent = match dent {
-            Ok(d) => d,
-            Err(err) => {
-                eprintln!("跳过不可读条目: {err}");
-                continue;
-            }
-        };
-
-        // 仅输出目录
-        let Some(ft) = dent.file_type() else { continue }; 
-        if !ft.is_dir() { continue; }
-
-        let p = dent.path();
-
-        // 跳过根目录自身
-        if same_path(p, &root) { continue; }
-
-        // 计算相对路径
-        let rel = match pathdiff::diff_paths(p, &root) {
-            Some(r) => r,
-            None => continue,
-        };
-
-        // 检查目录节点的各种属性
-        let has_layout = check_has_layout(p);
-        let has_visual_assets = check_has_visual_assets(p);
-        let (has_text, has_images) = if has_visual_assets {
-            check_visual_assets_content(p)
-        } else {
-            (false, false)
-        };
-        let has_subnodes = check_has_subnodes(p);
-
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值（true/false）
-        if let Some(path_str) = path_to_ltree(&rel) {
-            writeln!(
-                writer,
-                "{},{},{},{},{},{}",
-                path_str,
-                has_layout,
-                has_visual_assets,
-                has_text,
-                has_images,
-                has_subnodes
-            )
-            .with_context(|| "写入 CSV 失败")?;
-        }
-    }
-
-    writer.flush().ok();
-    
-    // 清理临时 ignore 文件
-    if let Some(temp_path) = temp_ignore_path {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    
-    println!("已生成: {}", output_path.display());
-    Ok(())
-}
-
-fn canonicalize_path(p: &Path) -> Result<PathBuf> {
-    // 对于不存在但可访问的路径 canonicalize 可能失败，先尝试直接返回绝对路径
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir()?.join(p) };
-    Ok(abs)
-}
-
-fn same_path(a: &Path, b: &Path) -> bool {
-    // 尽量以组件对比，避免大小写/分隔符细节影响（不跨平台处理大小写）
-    normalize_components(a) == normalize_components(b)
-}
-
-fn normalize_components(p: &Path) -> Vec<String> {
-    p.components()
-        .filter_map(|c| match c { Component::Normal(os) => os.to_str().map(|s| s.to_string()), _ => None })
-        .collect()
-}
-
-/// 将路径转换为 ltree 格式（点号分隔）
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn path_to_ltree(rel: &Path) -> Option<String> {
-    let mut parts = Vec::new();
-    for comp in rel.components() {
-        if let Component::Normal(os) = comp {
-            let s = os.to_str()?;
-            if !s.is_empty() {
-                // 清理目录名，使其符合 ltree 格式要求
-                let cleaned = sanitize_ltree_label(s);
-                if !cleaned.is_empty() {
-                    parts.push(cleaned);
-                }
-            }
-        }
-    }
-    if parts.is_empty() { return None; }
-    Some(parts.join("."))
-}
-
-/// 清理标签，使其符合 ltree 格式要求
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn sanitize_ltree_label(label: &str) -> String {
-    label
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// 检查目录内是否有 layout.md 文件
-fn check_has_layout(dir: &Path) -> bool {
-    dir.join("layout.md").is_file()
-}
-
-/// 检查目录内是否有 visual_assets 目录
-fn check_has_visual_assets(dir: &Path) -> bool {
-    dir.join("visual_assets").is_dir()
-}
-
-/// 检查 visual_assets 目录下的内容
-/// 返回 (has_text, has_images)
-fn check_visual_assets_content(dir: &Path) -> (bool, bool) {
-    let va_dir = dir.join("visual_assets");
-    if !va_dir.is_dir() {
-        return (false, false);
-    }
-
-    let Ok(entries) = read_dir(&va_dir) else {
-        return (false, false);
-    };
-
-    let mut has_text = false;
-    let mut has_images = false;
-
-    // 常见图片扩展名
-    let image_exts: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            // 检查 markdown 文件
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    has_text = true;
-                }
-                // 检查图片文件
-                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    has_images = true;
-                }
-            }
-        }
-        // 如果已经找到两者，可以提前退出
-        if has_text && has_images {
-            break;
-        }
-    }
-
-    (has_text, has_images)
-}
-
-/// 检查目录内是否有其他目录（排除 visual_assets 和 project_archive）
-fn check_has_subnodes(dir: &Path) -> bool {
-    let Ok(entries) = read_dir(dir) else {
-        return false;
-    };
-
-    // 需要排除的目录名
-    let excluded_dirs: &[&str] = &["visual_assets", "project_archive"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // 只检查目录，排除 visual_assets 和 project_archive
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if !excluded_dirs.contains(&name) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-```
-
-更新 README 文档，说明 `has_subnodes` 会排除 `visual_assets` 和 `project_archive` 目录。
-
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下是否有 markdown 文件（说明节点内有文字说明）
-- **has_images**: `visual_assets` 目录下是否有图片文件（说明节点内有图片）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 布尔值（true/false）
-- `has_images`: 布尔值（true/false）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-已更新逻辑：`check_has_subnodes` 现在会排除 `visual_assets` 和 `project_archive` 目录。
-
-## 修改内容
-
-### 1. 代码修改
-- 更新 `check_has_subnodes` 函数，排除 `visual_assets` 和 `project_archive`
-- 使用数组存储需要排除的目录名，便于扩展
-
-### 2. 文档更新
-- 更新 README，说明 `has_subnodes` 会排除 `visual_assets` 和 `project_archive`
-
-## 修改后的逻辑
-
-现在 `has_subnodes` 的判断逻辑是：
-- 如果节点内存在目录，且该目录名不是 `visual_assets` 或 `project_archive`，则 `has_subnodes = true`
-- 如果节点内只有 `visual_assets` 或 `project_archive` 目录，则 `has_subnodes = false`
-
-代码已编译通过，可以直接使用。重新运行工具后，生成的 CSV 文件中的 `has_subnodes` 字段会正确排除这两个目录。
-
----
-
-**User**
-
-在util目录下新建一个新的项目，功能是输入一个目录，将此目录下的众多visual_assets目录在保证原目录结构的情况下复制到~/Desktop目录下
-
----
-
-**Cursor**
-
-在 `utils` 下创建新项目，用于查找并复制所有 `visual_assets` 目录到 `~/Desktop`，保持原目录结构。
-
-
-实现功能：查找所有 `visual_assets` 目录并复制到 `~/Desktop`，保持原目录结构。
-
-
-实现功能：添加依赖并编写代码。
-
-
-```plaintext
-[package]
-name = "visual-assets-copy"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-clap = { version = "4.5.20", features = ["derive"] }
-anyhow = "1.0.98"
-
-```
-
-```rust
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
-
-use anyhow::{Context, Result};
-use clap::Parser;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "visual-assets-copy", version, about = "复制目录下所有 visual_assets 目录到 ~/Desktop，保持原目录结构")]
-struct Args {
-    /// 源目录（将从此目录递归查找 visual_assets 目录）
-    source: PathBuf,
-
-    /// 目标目录（默认: ~/Desktop）
-    #[arg(short = 'o', long = "output", default_value = "~/Desktop")]
-    output: PathBuf,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    // 解析源目录
-    let source = if args.source.is_absolute() {
-        args.source
-    } else {
-        std::env::current_dir()?.join(args.source)
-    };
-
-    if !source.is_dir() {
-        anyhow::bail!("源目录不存在或不是目录: {}", source.display());
-    }
-
-    // 解析目标目录（处理 ~ 符号）
-    let output = expand_tilde(&args.output)?;
-    if !output.exists() {
-        fs::create_dir_all(&output)
-            .with_context(|| format!("无法创建目标目录: {}", output.display()))?;
-    }
-
-    println!("源目录: {}", source.display());
-    println!("目标目录: {}", output.display());
-    println!("开始查找 visual_assets 目录...\n");
-
-    // 查找所有 visual_assets 目录
-    let visual_assets_dirs = find_visual_assets_dirs(&source)?;
-    
-    if visual_assets_dirs.is_empty() {
-        println!("未找到任何 visual_assets 目录");
-        return Ok(());
-    }
-
-    println!("找到 {} 个 visual_assets 目录:\n", visual_assets_dirs.len());
-
-    // 复制每个 visual_assets 目录
-    let mut copied_count = 0;
-    for va_dir in &visual_assets_dirs {
-        // 计算相对路径（相对于源目录）
-        let rel_path = va_dir
-            .strip_prefix(&source)
-            .with_context(|| format!("无法计算相对路径: {}", va_dir.display()))?;
-
-        // 构建目标路径（在目标目录下保持原目录结构）
-        let target_path = output.join(rel_path);
-
-        println!("复制: {} -> {}", rel_path.display(), target_path.display());
-
-        // 复制目录
-        copy_dir(va_dir, &target_path)
-            .with_context(|| format!("复制失败: {} -> {}", va_dir.display(), target_path.display()))?;
-        
-        copied_count += 1;
-    }
-
-    println!("\n完成！成功复制 {} 个 visual_assets 目录到 {}", copied_count, output.display());
-    Ok(())
-}
-
-/// 递归查找所有 visual_assets 目录
-fn find_visual_assets_dirs(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut result = Vec::new();
-    find_visual_assets_dirs_recursive(root, root, &mut result)?;
-    Ok(result)
-}
-
-/// 递归查找 visual_assets 目录的辅助函数
-fn find_visual_assets_dirs_recursive(
-    root: &Path,
-    current: &Path,
-    result: &mut Vec<PathBuf>,
-) -> Result<()> {
-    let entries = fs::read_dir(current)
-        .with_context(|| format!("无法读取目录: {}", current.display()))?;
-
-    for entry in entries {
-        let entry = entry.with_context(|| "无法读取目录项")?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            // 检查是否是 visual_assets 目录
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name == "visual_assets" {
-                    result.push(path.clone());
-                    // 找到 visual_assets 后，不再递归进入其子目录
-                    continue;
-                }
-            }
-
-            // 递归查找子目录
-            find_visual_assets_dirs_recursive(root, &path, result)?;
-        }
-    }
-
-    Ok(())
-}
-
-/// 复制目录（递归）
-fn copy_dir(source: &Path, target: &Path) -> Result<()> {
-    // 创建目标目录
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("无法创建目录: {}", parent.display()))?;
-    }
-
-    // 复制目录内容
-    let entries = fs::read_dir(source)
-        .with_context(|| format!("无法读取目录: {}", source.display()))?;
-
-    for entry in entries {
-        let entry = entry.with_context(|| "无法读取目录项")?;
-        let source_path = entry.path();
-        let target_path = target.join(entry.file_name());
-
-        if source_path.is_dir() {
-            copy_dir(&source_path, &target_path)?;
-        } else {
-            fs::copy(&source_path, &target_path)
-                .with_context(|| format!("无法复制文件: {} -> {}", source_path.display(), target_path.display()))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// 展开 ~ 符号到用户主目录
-fn expand_tilde(path: &Path) -> Result<PathBuf> {
-    let path_str = path.to_string_lossy();
-    if path_str.starts_with("~/") || path_str == "~" {
-        let home = std::env::var("HOME")
-            .context("无法获取用户主目录（HOME 环境变量未设置）")?;
-        let expanded = path_str.replacen("~", &home, 1);
-        Ok(PathBuf::from(expanded))
-    } else {
-        Ok(path.to_path_buf())
-    }
-}
-
-```
-
-检查代码并编译：
-
-
-编译成功。创建 README 文档：
-
-
-```markdown
-# Visual Assets 复制工具
-
-## 工具说明
-
-这是一个用于复制目录下所有 `visual_assets` 目录的命令行工具。工具会递归查找源目录下的所有 `visual_assets` 目录，并将它们复制到目标目录（默认 `~/Desktop`），同时保持原有的目录结构。
-
-## 功能特性
-
-- **递归查找**: 自动递归查找源目录下的所有 `visual_assets` 目录
-- **保持目录结构**: 复制时保持原有的目录层级结构
-- **灵活的目标目录**: 支持自定义目标目录，默认复制到 `~/Desktop`
-- **详细输出**: 显示查找和复制的进度信息
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/visual-assets-copy
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 复制到默认目录 ~/Desktop
-./target/release/visual-assets-copy /path/to/source
-
-# 指定目标目录
-./target/release/visual-assets-copy /path/to/source -o /path/to/output
-
-# 使用相对路径
-./target/release/visual-assets-copy ./data_root
-```
-
-## 使用示例
-
-假设有以下目录结构：
-```
-data_root/
-├── project1/
-│   └── visual_assets/
-│       ├── image1.jpg
-│       └── description.md
-├── project2/
-│   ├── subproject/
-│   │   └── visual_assets/
-│   │       └── image2.png
-│   └── visual_assets/
-│       └── image3.jpg
-└── other/
-    └── files.txt
-```
-
-运行工具后，`~/Desktop` 目录下会生成：
-```
-~/Desktop/
-├── project1/
-│   └── visual_assets/
-│       ├── image1.jpg
-│       └── description.md
-└── project2/
-    ├── subproject/
-    │   └── visual_assets/
-    │       └── image2.png
-    └── visual_assets/
-        └── image3.jpg
-```
-
-## 工作原理
-
-1. **递归查找**: 工具会递归遍历源目录下的所有子目录
-2. **识别 visual_assets**: 当找到名为 `visual_assets` 的目录时，将其添加到复制列表
-3. **计算相对路径**: 对于每个 `visual_assets` 目录，计算其相对于源目录的路径
-4. **复制目录**: 在目标目录下重建相同的目录结构，并复制所有文件
-
-## 注意事项
-
-- 如果目标目录已存在同名文件或目录，会被覆盖
-- 工具会跳过 `visual_assets` 目录内部的子目录（不会递归进入 `visual_assets` 内部查找）
-- 支持 `~` 符号展开到用户主目录
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `anyhow`: 错误处理
-
-```
-
-已在 `utils` 目录下创建新项目 `visual-assets-copy`。功能如下：
-
-## 项目概述
-
-**位置**: `utils/visual-assets-copy/`
-
-**功能**:
-- 递归查找源目录下的所有 `visual_assets` 目录
-- 将这些目录复制到目标目录（默认 `~/Desktop`）
-- 保持原有的目录结构
-
-## 主要特性
-
-1. 递归查找：自动遍历所有子目录，查找 `visual_assets` 目录
-2. 保持目录结构：复制时保持原有的目录层级关系
-3. 灵活配置：支持自定义目标目录，默认 `~/Desktop`
-4. 详细输出：显示查找和复制的进度信息
-
-## 使用方法
-
-```bash
-# 编译
-cd utils/visual-assets-copy
-cargo build --release
-
-# 基本用法（复制到 ~/Desktop）
-./target/release/visual-assets-copy /path/to/source
-
-# 指定目标目录
-./target/release/visual-assets-copy /path/to/source -o /path/to/output
-```
-
-## 工作示例
-
-假设源目录结构：
-```
-data_root/
-├── project1/
-│   └── visual_assets/  ← 会被复制
-└── project2/
-    └── subproject/
-        └── visual_assets/  ← 会被复制
-```
-
-运行后，`~/Desktop` 下会生成：
-```
-~/Desktop/
-├── project1/
-│   └── visual_assets/
-└── project2/
-    └── subproject/
-        └── visual_assets/
-```
-
-工具已编译完成，可以直接使用。
-
-```shellscript
-# 编译
-cd utils/visual-assets-copy
-cargo build --release
-
-# 基本用法（复制到 ~/Desktop）
-./target/release/visual-assets-copy /path/to/source
-
-# 指定目标目录
-./target/release/visual-assets-copy /path/to/source -o /path/to/output
-```
-
-```plaintext
-data_root/
-├── project1/
-│   └── visual_assets/  ← 会被复制
-└── project2/
-    └── subproject/
-        └── visual_assets/  ← 会被复制
-```
-
-```plaintext
-~/Desktop/
-├── project1/
-│   └── visual_assets/
-└── project2/
-    └── subproject/
-        └── visual_assets/
-```
-
----
-
-**User**
-
-❯ cargo run -- /run/media/huzz/data_carrie/1_OnceAndOnceAgain/
-
-
-
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
-
-     Running `target/debug/visual-assets-copy /run/media/huzz/data_carrie/1_OnceAndOnceAgain/`
-
-源目录: /run/media/huzz/data_carrie/1_OnceAndOnceAgain/
-
-目标目录: /home/huzz/Desktop
-
-开始查找 visual_assets 目录...
-
-找到 29 个 visual_assets 目录:
-
-复制: handmadeBook/Book/20230228_v1.0/visual_assets -> /home/huzz/Desktop/handmadeBook/Book/20230228_v1.0/visual_assets
-
-Error: 复制失败: /run/media/huzz/data_carrie/1_OnceAndOnceAgain/handmadeBook/Book/20230228_v1.0/visual_assets -> /home/huzz/Desktop/handmadeBook/Book/20230228_v1.0/visual_assets
-
-Caused by:
-
-    0: 无法复制文件: /run/media/huzz/data_carrie/1_OnceAndOnceAgain/handmadeBook/Book/20230228_v1.0/visual_assets/art_work/01.webp -> /home/huzz/Desktop/handmadeBook/Book/20230228_v1.0/visual_assets/art_work/01.webp
-
-    1: No such file or directory (os error 2)
-
-这是什么问题？为什么
-
----
-
-**Cursor**
-
-问题在于复制文件时未确保目标文件的父目录存在。检查并修复代码：
-
-
-问题在于复制文件时未确保目标文件的父目录存在。修复中：
-
-
-```rust
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
-
-use anyhow::{Context, Result};
-use clap::Parser;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "visual-assets-copy", version, about = "复制目录下所有 visual_assets 目录到 ~/Desktop，保持原目录结构")]
-struct Args {
-    /// 源目录（将从此目录递归查找 visual_assets 目录）
-    source: PathBuf,
-
-    /// 目标目录（默认: ~/Desktop）
-    #[arg(short = 'o', long = "output", default_value = "~/Desktop")]
-    output: PathBuf,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    // 解析源目录
-    let source = if args.source.is_absolute() {
-        args.source
-    } else {
-        std::env::current_dir()?.join(args.source)
-    };
-
-    if !source.is_dir() {
-        anyhow::bail!("源目录不存在或不是目录: {}", source.display());
-    }
-
-    // 解析目标目录（处理 ~ 符号）
-    let output = expand_tilde(&args.output)?;
-    if !output.exists() {
-        fs::create_dir_all(&output)
-            .with_context(|| format!("无法创建目标目录: {}", output.display()))?;
-    }
-
-    println!("源目录: {}", source.display());
-    println!("目标目录: {}", output.display());
-    println!("开始查找 visual_assets 目录...\n");
-
-    // 查找所有 visual_assets 目录
-    let visual_assets_dirs = find_visual_assets_dirs(&source)?;
-    
-    if visual_assets_dirs.is_empty() {
-        println!("未找到任何 visual_assets 目录");
-        return Ok(());
-    }
-
-    println!("找到 {} 个 visual_assets 目录:\n", visual_assets_dirs.len());
-
-    // 复制每个 visual_assets 目录
-    let mut copied_count = 0;
-    for va_dir in &visual_assets_dirs {
-        // 计算相对路径（相对于源目录）
-        let rel_path = va_dir
-            .strip_prefix(&source)
-            .with_context(|| format!("无法计算相对路径: {}", va_dir.display()))?;
-
-        // 构建目标路径（在目标目录下保持原目录结构）
-        let target_path = output.join(rel_path);
-
-        println!("复制: {} -> {}", rel_path.display(), target_path.display());
-
-        // 复制目录
-        copy_dir(va_dir, &target_path)
-            .with_context(|| format!("复制失败: {} -> {}", va_dir.display(), target_path.display()))?;
-        
-        copied_count += 1;
-    }
-
-    println!("\n完成！成功复制 {} 个 visual_assets 目录到 {}", copied_count, output.display());
-    Ok(())
-}
-
-/// 递归查找所有 visual_assets 目录
-fn find_visual_assets_dirs(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut result = Vec::new();
-    find_visual_assets_dirs_recursive(root, root, &mut result)?;
-    Ok(result)
-}
-
-/// 递归查找 visual_assets 目录的辅助函数
-fn find_visual_assets_dirs_recursive(
-    root: &Path,
-    current: &Path,
-    result: &mut Vec<PathBuf>,
-) -> Result<()> {
-    let entries = fs::read_dir(current)
-        .with_context(|| format!("无法读取目录: {}", current.display()))?;
-
-    for entry in entries {
-        let entry = entry.with_context(|| "无法读取目录项")?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            // 检查是否是 visual_assets 目录
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name == "visual_assets" {
-                    result.push(path.clone());
-                    // 找到 visual_assets 后，不再递归进入其子目录
-                    continue;
-                }
-            }
-
-            // 递归查找子目录
-            find_visual_assets_dirs_recursive(root, &path, result)?;
-        }
-    }
-
-    Ok(())
-}
-
-/// 复制目录（递归）
-fn copy_dir(source: &Path, target: &Path) -> Result<()> {
-    // 创建目标目录本身
-    fs::create_dir_all(target)
-        .with_context(|| format!("无法创建目录: {}", target.display()))?;
-
-    // 复制目录内容
-    let entries = fs::read_dir(source)
-        .with_context(|| format!("无法读取目录: {}", source.display()))?;
-
-    for entry in entries {
-        let entry = entry.with_context(|| "无法读取目录项")?;
-        let source_path = entry.path();
-        let target_path = target.join(entry.file_name());
-
-        if source_path.is_dir() {
-            copy_dir(&source_path, &target_path)?;
-        } else {
-            // 确保目标文件的父目录存在
-            if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("无法创建目录: {}", parent.display()))?;
-            }
-            fs::copy(&source_path, &target_path)
-                .with_context(|| format!("无法复制文件: {} -> {}", source_path.display(), target_path.display()))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// 展开 ~ 符号到用户主目录
-fn expand_tilde(path: &Path) -> Result<PathBuf> {
-    let path_str = path.to_string_lossy();
-    if path_str.starts_with("~/") || path_str == "~" {
-        let home = std::env::var("HOME")
-            .context("无法获取用户主目录（HOME 环境变量未设置）")?;
-        let expanded = path_str.replacen("~", &home, 1);
-        Ok(PathBuf::from(expanded))
-    } else {
-        Ok(path.to_path_buf())
-    }
-}
-
-```
-
-已修复问题。
-
-## 问题原因
-
-在复制文件时，目标文件的父目录可能不存在。具体来说：
-1. 原代码只创建了目标目录的父目录，但没有创建目标目录本身
-2. 复制文件时，如果目标文件的父目录（如 `target/art_work/`）不存在，`fs::copy` 会失败并报 "No such file or directory"
-
-## 修复方案
-
-做了两处修改：
-1. 在函数开始时，先创建目标目录本身（使用 `fs::create_dir_all(target)`）
-2. 在复制文件之前，再次确保目标文件的父目录存在（双重保险）
-
-## 修复后的逻辑
-
-```rust
-// 1. 先创建目标目录本身
-fs::create_dir_all(target)?;
-
-// 2. 复制文件时，确保父目录存在
-if let Some(parent) = target_path.parent() {
-    fs::create_dir_all(parent)?;
-}
-fs::copy(&source_path, &target_path)?;
-```
-
-代码已重新编译，可以重新运行。现在应该能正常复制所有 `visual_assets` 目录及其内容了。
-
-```rust
-// 1. 先创建目标目录本身
-fs::create_dir_all(target)?;
-
-// 2. 复制文件时，确保父目录存在
-if let Some(parent) = target_path.parent() {
-    fs::create_dir_all(parent)?;
-}
-fs::copy(&source_path, &target_path)?;
-```
-
----
-
-**User**
-
-修改node-generate-tool，has_text 和 has_images的值为非负整数，如果没有就是0,有多少个文件就返回文件数，image只数png和webp和jpg的总数，text数md的总数
-
----
-
-**Cursor**
-
-修改 `node-generate-tool`，将 `has_text` 和 `has_images` 从布尔值改为非负整数（文件数量）。
-
-
-修改代码，将 `has_text` 和 `has_images` 改为文件数量：
-
-
-```rust
-use std::{
-    fs::{read_dir, File},
-    io::{BufWriter, Write},
-    path::{Component, Path, PathBuf},
-};
-
-use anyhow::{bail, Context, Result};
-use clap::Parser;
-use ignore::WalkBuilder;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "node-generate-tool", version, about = "生成目录路径 CSV（支持 fileignore，gitignore 语法）")] 
-struct Args {
-    /// 根目录（将从该目录递归遍历子目录）
-    root: PathBuf,
-
-    /// 输出 CSV 文件路径（默认: 当前目录下 directories.csv）
-    #[arg(short = 'o', long = "output")]
-    output: Option<PathBuf>,
-
-    /// 指定 ignore 文件名（默认: fileignore，使用 gitignore 语法）
-    #[arg(long = "ignore-file", default_value = "fileignore")]
-    ignore_file: String,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let root = canonicalize_path(&args.root)
-        .with_context(|| format!("无法解析根目录路径: {}", args.root.display()))?;
-    if !root.is_dir() {
-        bail!("提供的路径不是目录: {}", root.display());
-    }
-
-    let output_path = args
-        .output
-        .unwrap_or_else(|| PathBuf::from("directories.csv"));
-
-    let mut writer = BufWriter::new(
-        File::create(&output_path)
-            .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?,
-    );
-
-    // 写入 CSV 表头（PostgreSQL 可直接导入）
-    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
-        .with_context(|| "写入 CSV 表头失败")?;
-
-    // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
-    // 1) 程序源码目录（编译期确定）
-    // 2) 可执行程序所在目录
-    // 3) 被扫描的根目录
-    // 可通过 --ignore-file 指定文件名，默认 fileignore
-    let mut builder = WalkBuilder::new(&root);
-    builder
-        .hidden(false) // 包含隐藏目录，是否忽略交由规则决定
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false);
-
-    // 收集候选 ignore 文件路径
-    let mut ignore_files: Vec<PathBuf> = Vec::new();
-
-    // 1) 程序源码目录（编译期的 crate 根目录）
-    let program_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    ignore_files.push(program_dir.join(&args.ignore_file));
-
-    // 2) 可执行程序所在目录
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().expect("无法获取当前工作目录"));
-    ignore_files.push(exe_dir.join(&args.ignore_file));
-
-    // 3) 被扫描的根目录
-    ignore_files.push(root.join(&args.ignore_file));
-
-    // 读取并合并所有存在的 ignore 文件内容
-    let mut merged_rules = String::new();
-    let mut loaded_count = 0;
-    for p in &ignore_files {
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                eprintln!("已加载 ignore 文件: {}", p.display());
-                if !merged_rules.is_empty() {
-                    merged_rules.push('\n');
-                }
-                merged_rules.push_str(&format!("# From: {}\n", p.display()));
-                merged_rules.push_str(&content);
-                merged_rules.push('\n');
-                loaded_count += 1;
-            }
-        }
-    }
-    
-    if loaded_count == 0 {
-        eprintln!("警告: 未找到任何 ignore 文件");
-    } else {
-        eprintln!("共加载 {} 个 ignore 文件", loaded_count);
-    }
-
-    // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
-    let temp_ignore_path = if !merged_rules.is_empty() {
-        let temp_path = root.join(format!(".{}_merged", args.ignore_file));
-        std::fs::write(&temp_path, merged_rules)
-            .with_context(|| format!("无法创建临时 ignore 文件: {}", temp_path.display()))?;
-        
-        // 使用 add_custom_ignore_filename，这样规则是相对于扫描根目录的
-        builder.add_custom_ignore_filename(&format!(".{}_merged", args.ignore_file));
-        
-        Some(temp_path)
-    } else {
-        None
-    };
-
-    let walker = builder.build();
-
-    for dent in walker {
-        let dent = match dent {
-            Ok(d) => d,
-            Err(err) => {
-                eprintln!("跳过不可读条目: {err}");
-                continue;
-            }
-        };
-
-        // 仅输出目录
-        let Some(ft) = dent.file_type() else { continue }; 
-        if !ft.is_dir() { continue; }
-
-        let p = dent.path();
-
-        // 跳过根目录自身
-        if same_path(p, &root) { continue; }
-
-        // 计算相对路径
-        let rel = match pathdiff::diff_paths(p, &root) {
-            Some(r) => r,
-            None => continue,
-        };
-
-        // 检查目录节点的各种属性
-        let has_layout = check_has_layout(p);
-        let has_visual_assets = check_has_visual_assets(p);
-        let (has_text, has_images) = if has_visual_assets {
-            check_visual_assets_content(p)
-        } else {
-            (false, false)
-        };
-        let has_subnodes = check_has_subnodes(p);
-
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值（true/false）
-        if let Some(path_str) = path_to_ltree(&rel) {
-            writeln!(
-                writer,
-                "{},{},{},{},{},{}",
-                path_str,
-                has_layout,
-                has_visual_assets,
-                has_text,
-                has_images,
-                has_subnodes
-            )
-            .with_context(|| "写入 CSV 失败")?;
-        }
-    }
-
-    writer.flush().ok();
-    
-    // 清理临时 ignore 文件
-    if let Some(temp_path) = temp_ignore_path {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    
-    println!("已生成: {}", output_path.display());
-    Ok(())
-}
-
-fn canonicalize_path(p: &Path) -> Result<PathBuf> {
-    // 对于不存在但可访问的路径 canonicalize 可能失败，先尝试直接返回绝对路径
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir()?.join(p) };
-    Ok(abs)
-}
-
-fn same_path(a: &Path, b: &Path) -> bool {
-    // 尽量以组件对比，避免大小写/分隔符细节影响（不跨平台处理大小写）
-    normalize_components(a) == normalize_components(b)
-}
-
-fn normalize_components(p: &Path) -> Vec<String> {
-    p.components()
-        .filter_map(|c| match c { Component::Normal(os) => os.to_str().map(|s| s.to_string()), _ => None })
-        .collect()
-}
-
-/// 将路径转换为 ltree 格式（点号分隔）
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn path_to_ltree(rel: &Path) -> Option<String> {
-    let mut parts = Vec::new();
-    for comp in rel.components() {
-        if let Component::Normal(os) = comp {
-            let s = os.to_str()?;
-            if !s.is_empty() {
-                // 清理目录名，使其符合 ltree 格式要求
-                let cleaned = sanitize_ltree_label(s);
-                if !cleaned.is_empty() {
-                    parts.push(cleaned);
-                }
-            }
-        }
-    }
-    if parts.is_empty() { return None; }
-    Some(parts.join("."))
-}
-
-/// 清理标签，使其符合 ltree 格式要求
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn sanitize_ltree_label(label: &str) -> String {
-    label
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// 检查目录内是否有 layout.md 文件
-fn check_has_layout(dir: &Path) -> bool {
-    dir.join("layout.md").is_file()
-}
-
-/// 检查目录内是否有 visual_assets 目录
-fn check_has_visual_assets(dir: &Path) -> bool {
-    dir.join("visual_assets").is_dir()
-}
-
-/// 检查 visual_assets 目录下的内容
-/// 返回 (text_count, image_count)
-/// text_count: .md 文件的数量
-/// image_count: .png、.webp、.jpg 文件的总数
-fn check_visual_assets_content(dir: &Path) -> (u32, u32) {
-    let va_dir = dir.join("visual_assets");
-    if !va_dir.is_dir() {
-        return (0, 0);
-    }
-
-    let Ok(entries) = read_dir(&va_dir) else {
-        return (0, 0);
-    };
-
-    let mut text_count = 0u32;
-    let mut image_count = 0u32;
-
-    // 只统计 png、webp、jpg 图片文件
-    let image_exts: &[&str] = &["png", "webp", "jpg", "jpeg"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                // 统计 markdown 文件
-                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    text_count += 1;
-                }
-                // 统计图片文件（只统计 png、webp、jpg）
-                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    image_count += 1;
-                }
-            }
-        }
-    }
-
-    (text_count, image_count)
-}
-
-/// 检查目录内是否有其他目录（排除 visual_assets 和 project_archive）
-fn check_has_subnodes(dir: &Path) -> bool {
-    let Ok(entries) = read_dir(dir) else {
-        return false;
-    };
-
-    // 需要排除的目录名
-    let excluded_dirs: &[&str] = &["visual_assets", "project_archive"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // 只检查目录，排除 visual_assets 和 project_archive
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if !excluded_dirs.contains(&name) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-```
-
-更新主逻辑，将 `has_text` 和 `has_images` 改为整数：
-
-
-```rust
-use std::{
-    fs::{read_dir, File},
-    io::{BufWriter, Write},
-    path::{Component, Path, PathBuf},
-};
-
-use anyhow::{bail, Context, Result};
-use clap::Parser;
-use ignore::WalkBuilder;
-
-/// 命令行参数
-#[derive(Parser, Debug)]
-#[command(name = "node-generate-tool", version, about = "生成目录路径 CSV（支持 fileignore，gitignore 语法）")] 
-struct Args {
-    /// 根目录（将从该目录递归遍历子目录）
-    root: PathBuf,
-
-    /// 输出 CSV 文件路径（默认: 当前目录下 directories.csv）
-    #[arg(short = 'o', long = "output")]
-    output: Option<PathBuf>,
-
-    /// 指定 ignore 文件名（默认: fileignore，使用 gitignore 语法）
-    #[arg(long = "ignore-file", default_value = "fileignore")]
-    ignore_file: String,
-}
-
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let root = canonicalize_path(&args.root)
-        .with_context(|| format!("无法解析根目录路径: {}", args.root.display()))?;
-    if !root.is_dir() {
-        bail!("提供的路径不是目录: {}", root.display());
-    }
-
-    let output_path = args
-        .output
-        .unwrap_or_else(|| PathBuf::from("directories.csv"));
-
-    let mut writer = BufWriter::new(
-        File::create(&output_path)
-            .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?,
-    );
-
-    // 写入 CSV 表头（PostgreSQL 可直接导入）
-    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
-        .with_context(|| "写入 CSV 表头失败")?;
-
-    // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
-    // 1) 程序源码目录（编译期确定）
-    // 2) 可执行程序所在目录
-    // 3) 被扫描的根目录
-    // 可通过 --ignore-file 指定文件名，默认 fileignore
-    let mut builder = WalkBuilder::new(&root);
-    builder
-        .hidden(false) // 包含隐藏目录，是否忽略交由规则决定
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false);
-
-    // 收集候选 ignore 文件路径
-    let mut ignore_files: Vec<PathBuf> = Vec::new();
-
-    // 1) 程序源码目录（编译期的 crate 根目录）
-    let program_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    ignore_files.push(program_dir.join(&args.ignore_file));
-
-    // 2) 可执行程序所在目录
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().expect("无法获取当前工作目录"));
-    ignore_files.push(exe_dir.join(&args.ignore_file));
-
-    // 3) 被扫描的根目录
-    ignore_files.push(root.join(&args.ignore_file));
-
-    // 读取并合并所有存在的 ignore 文件内容
-    let mut merged_rules = String::new();
-    let mut loaded_count = 0;
-    for p in &ignore_files {
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                eprintln!("已加载 ignore 文件: {}", p.display());
-                if !merged_rules.is_empty() {
-                    merged_rules.push('\n');
-                }
-                merged_rules.push_str(&format!("# From: {}\n", p.display()));
-                merged_rules.push_str(&content);
-                merged_rules.push('\n');
-                loaded_count += 1;
-            }
-        }
-    }
-    
-    if loaded_count == 0 {
-        eprintln!("警告: 未找到任何 ignore 文件");
-    } else {
-        eprintln!("共加载 {} 个 ignore 文件", loaded_count);
-    }
-
-    // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
-    let temp_ignore_path = if !merged_rules.is_empty() {
-        let temp_path = root.join(format!(".{}_merged", args.ignore_file));
-        std::fs::write(&temp_path, merged_rules)
-            .with_context(|| format!("无法创建临时 ignore 文件: {}", temp_path.display()))?;
-        
-        // 使用 add_custom_ignore_filename，这样规则是相对于扫描根目录的
-        builder.add_custom_ignore_filename(&format!(".{}_merged", args.ignore_file));
-        
-        Some(temp_path)
-    } else {
-        None
-    };
-
-    let walker = builder.build();
-
-    for dent in walker {
-        let dent = match dent {
-            Ok(d) => d,
-            Err(err) => {
-                eprintln!("跳过不可读条目: {err}");
-                continue;
-            }
-        };
-
-        // 仅输出目录
-        let Some(ft) = dent.file_type() else { continue }; 
-        if !ft.is_dir() { continue; }
-
-        let p = dent.path();
-
-        // 跳过根目录自身
-        if same_path(p, &root) { continue; }
-
-        // 计算相对路径
-        let rel = match pathdiff::diff_paths(p, &root) {
-            Some(r) => r,
-            None => continue,
-        };
-
-        // 检查目录节点的各种属性
-        let has_layout = check_has_layout(p);
-        let has_visual_assets = check_has_visual_assets(p);
-        let (text_count, image_count) = if has_visual_assets {
-            check_visual_assets_content(p)
-        } else {
-            (0, 0)
-        };
-        let has_subnodes = check_has_subnodes(p);
-
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值/整数
-        if let Some(path_str) = path_to_ltree(&rel) {
-            writeln!(
-                writer,
-                "{},{},{},{},{},{}",
-                path_str,
-                has_layout,
-                has_visual_assets,
-                text_count,
-                image_count,
-                has_subnodes
-            )
-            .with_context(|| "写入 CSV 失败")?;
-        }
-    }
-
-    writer.flush().ok();
-    
-    // 清理临时 ignore 文件
-    if let Some(temp_path) = temp_ignore_path {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    
-    println!("已生成: {}", output_path.display());
-    Ok(())
-}
-
-fn canonicalize_path(p: &Path) -> Result<PathBuf> {
-    // 对于不存在但可访问的路径 canonicalize 可能失败，先尝试直接返回绝对路径
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir()?.join(p) };
-    Ok(abs)
-}
-
-fn same_path(a: &Path, b: &Path) -> bool {
-    // 尽量以组件对比，避免大小写/分隔符细节影响（不跨平台处理大小写）
-    normalize_components(a) == normalize_components(b)
-}
-
-fn normalize_components(p: &Path) -> Vec<String> {
-    p.components()
-        .filter_map(|c| match c { Component::Normal(os) => os.to_str().map(|s| s.to_string()), _ => None })
-        .collect()
-}
-
-/// 将路径转换为 ltree 格式（点号分隔）
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn path_to_ltree(rel: &Path) -> Option<String> {
-    let mut parts = Vec::new();
-    for comp in rel.components() {
-        if let Component::Normal(os) = comp {
-            let s = os.to_str()?;
-            if !s.is_empty() {
-                // 清理目录名，使其符合 ltree 格式要求
-                let cleaned = sanitize_ltree_label(s);
-                if !cleaned.is_empty() {
-                    parts.push(cleaned);
-                }
-            }
-        }
-    }
-    if parts.is_empty() { return None; }
-    Some(parts.join("."))
-}
-
-/// 清理标签，使其符合 ltree 格式要求
-/// ltree 标签只能包含字母、数字、下划线（A-Za-z0-9_）
-/// 其他字符会被替换为下划线
-fn sanitize_ltree_label(label: &str) -> String {
-    label
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// 检查目录内是否有 layout.md 文件
-fn check_has_layout(dir: &Path) -> bool {
-    dir.join("layout.md").is_file()
-}
-
-/// 检查目录内是否有 visual_assets 目录
-fn check_has_visual_assets(dir: &Path) -> bool {
-    dir.join("visual_assets").is_dir()
-}
-
-/// 检查 visual_assets 目录下的内容
-/// 返回 (text_count, image_count)
-/// text_count: .md 文件的数量
-/// image_count: .png、.webp、.jpg 文件的总数
-fn check_visual_assets_content(dir: &Path) -> (u32, u32) {
-    let va_dir = dir.join("visual_assets");
-    if !va_dir.is_dir() {
-        return (0, 0);
-    }
-
-    let Ok(entries) = read_dir(&va_dir) else {
-        return (0, 0);
-    };
-
-    let mut text_count = 0u32;
-    let mut image_count = 0u32;
-
-    // 只统计 png、webp、jpg 图片文件
-    let image_exts: &[&str] = &["png", "webp", "jpg", "jpeg"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                // 统计 markdown 文件
-                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    text_count += 1;
-                }
-                // 统计图片文件（只统计 png、webp、jpg）
-                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    image_count += 1;
-                }
-            }
-        }
-    }
-
-    (text_count, image_count)
-}
-
-/// 检查目录内是否有其他目录（排除 visual_assets 和 project_archive）
-fn check_has_subnodes(dir: &Path) -> bool {
-    let Ok(entries) = read_dir(dir) else {
-        return false;
-    };
-
-    // 需要排除的目录名
-    let excluded_dirs: &[&str] = &["visual_assets", "project_archive"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // 只检查目录，排除 visual_assets 和 project_archive
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if !excluded_dirs.contains(&name) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-```
-
-更新 README 文档：
-
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
-- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 布尔值（true/false）
-- `has_images`: 布尔值（true/false）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
-- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 非负整数（`.md` 文件的数量，0 表示没有）
-- `has_images`: 非负整数（`.png`、`.webp`、`.jpg` 文件的总数，0 表示没有）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text BOOLEAN NOT NULL,
-    has_images BOOLEAN NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-更新数据库表结构说明：
-
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
-- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 非负整数（`.md` 文件的数量，0 表示没有）
-- `has_images`: 非负整数（`.png`、`.webp`、`.jpg` 文件的总数，0 表示没有）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text INTEGER NOT NULL,
-    has_images INTEGER NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点
-SELECT path FROM directory_nodes WHERE has_images = true;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
-- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 非负整数（`.md` 文件的数量，0 表示没有）
-- `has_images`: 非负整数（`.png`、`.webp`、`.jpg` 文件的总数，0 表示没有）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text INTEGER NOT NULL,
-    has_images INTEGER NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点（图片数量大于 0）
-SELECT path FROM directory_nodes WHERE has_images > 0;
-
--- 查找有多个图片的节点（图片数量大于等于 5）
-SELECT path FROM directory_nodes WHERE has_images >= 5;
-
--- 查找有完整图文资源的节点
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text = true AND has_images = true;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
-- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 非负整数（`.md` 文件的数量，0 表示没有）
-- `has_images`: 非负整数（`.png`、`.webp`、`.jpg` 文件的总数，0 表示没有）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text INTEGER NOT NULL,
-    has_images INTEGER NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点（图片数量大于 0）
-SELECT path FROM directory_nodes WHERE has_images > 0;
-
--- 查找有多个图片的节点（图片数量大于等于 5）
-SELECT path FROM directory_nodes WHERE has_images >= 5;
-
--- 查找有完整图文资源的节点（有文字说明和图片）
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text > 0 AND has_images > 0;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images = true;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-```markdown
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images > 0;
-```
-
-更新 README 中的查询示例：
-
-
-```markdown
-# 目录节点生成工具 (node-generate-tool)
-
-## 工具说明
-
-这是一个用于为网站数据库生成数据节点表的命令行工具。该工具会扫描指定的目录结构，为每个目录节点生成包含布尔属性的 CSV 文件，可直接导入 PostgreSQL 数据库。
-
-## 功能特性
-
-### 1. 目录扫描
-- 递归扫描指定根目录下的所有子目录
-- 支持通过 `fileignore` 文件（gitignore 语法）跳过不需要的目录
-- 忽略文件会从以下三个位置按顺序合并：
-  1. 程序源码目录（`utils/node-generate-tool/`）
-  2. 可执行程序所在目录（`target/release/`）
-  3. 被扫描的根目录
-
-### 2. 节点属性检查
-对每个目录节点，工具会检查以下属性：
-
-- **has_layout**: 节点内是否有 `layout.md` 文件（说明节点内有明确的排版内容）
-- **has_visual_assets**: 节点内是否有 `visual_assets` 目录（说明节点内有图文资源）
-- **has_text**: `visual_assets` 目录下 `.md` 文件的数量（非负整数，0 表示没有）
-- **has_images**: `visual_assets` 目录下 `.png`、`.webp`、`.jpg` 文件的总数（非负整数，0 表示没有）
-- **has_subnodes**: 节点内是否有其他目录（排除 `visual_assets` 和 `project_archive`，说明节点内有子节点）
-
-### 3. CSV 输出格式
-生成的 CSV 文件包含以下列：
-- `path`: 目录路径（ltree 格式，点号分隔，如 `a.b.c`）
-- `has_layout`: 布尔值（true/false）
-- `has_visual_assets`: 布尔值（true/false）
-- `has_text`: 非负整数（`.md` 文件的数量，0 表示没有）
-- `has_images`: 非负整数（`.png`、`.webp`、`.jpg` 文件的总数，0 表示没有）
-- `has_subnodes`: 布尔值（true/false）
-
-**注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
-
-## 使用方法
-
-### 编译
-```bash
-cd utils/node-generate-tool
-cargo build --release
-```
-
-### 基本用法
-```bash
-# 扫描目录并生成 CSV（默认输出到当前目录的 directories.csv）
-./target/release/node-generate-tool /path/to/data/root
-
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
-
-# 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
-```
-
-## 工作流程
-
-1. **更新数据中心**: 在数据中心目录中添加、修改或删除目录节点
-2. **运行工具**: 执行工具扫描数据中心目录，生成最新的节点表 CSV
-3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的节点表
-4. **后端查询**: 后端根据节点表的布尔属性，决定从数据中心获取哪些文件
-
-## 数据库集成
-
-### 启用 ltree 扩展
-```sql
-CREATE EXTENSION IF NOT EXISTS ltree;
-```
-
-### 创建表结构
-```sql
-CREATE TABLE directory_nodes (
-    path ltree PRIMARY KEY,
-    has_layout BOOLEAN NOT NULL,
-    has_visual_assets BOOLEAN NOT NULL,
-    has_text INTEGER NOT NULL,
-    has_images INTEGER NOT NULL,
-    has_subnodes BOOLEAN NOT NULL
-);
-
--- 创建索引以优化查询性能
-CREATE INDEX idx_path_gist ON directory_nodes USING GIST (path);
-CREATE INDEX idx_path_btree ON directory_nodes USING BTREE (path);
-```
-
-### 导入 CSV
-```sql
-COPY directory_nodes FROM '/path/to/nodes.csv' WITH (FORMAT csv, HEADER true);
-```
-
-### 后端查询示例
-
-#### 基本查询
-```sql
--- 查找有排版内容的节点
-SELECT path FROM directory_nodes WHERE has_layout = true;
-
--- 查找有图片的节点（图片数量大于 0）
-SELECT path FROM directory_nodes WHERE has_images > 0;
-
--- 查找有多个图片的节点（图片数量大于等于 5）
-SELECT path FROM directory_nodes WHERE has_images >= 5;
-
--- 查找有完整图文资源的节点（有文字说明和图片）
-SELECT path FROM directory_nodes 
-WHERE has_visual_assets = true AND has_text > 0 AND has_images > 0;
-```
-
-#### ltree 树形查询（强大功能）
-```sql
--- 查找某个节点的所有子节点（后代）
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找某个节点的所有父节点（祖先）
-SELECT * FROM directory_nodes 
-WHERE path @> '1_OnceAndOnceAgain.handmadeBook.Book';
-
--- 查找某个节点的直接子节点
-SELECT * FROM directory_nodes 
-WHERE path ~ '1_OnceAndOnceAgain.handmadeBook.*{1}';
-
--- 查找某个节点的所有兄弟节点（同级）
-SELECT * FROM directory_nodes 
-WHERE subpath(path, 0, -1) = '1_OnceAndOnceAgain.handmadeBook';
-
--- 查找路径深度为 2 的所有节点
-SELECT * FROM directory_nodes 
-WHERE nlevel(path) = 2;
-
--- 查找某个节点的路径长度
-SELECT path, nlevel(path) as depth FROM directory_nodes;
-
--- 查找某个节点的父路径
-SELECT path, subpath(path, 0, -1) as parent_path FROM directory_nodes;
-```
-
-#### 组合查询示例
-```sql
--- 查找某个节点下所有有图片的子节点
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain.handmadeBook' 
-  AND has_images > 0;
-
--- 查找某个节点的所有有子节点的后代
-SELECT * FROM directory_nodes 
-WHERE path <@ '1_OnceAndOnceAgain' 
-  AND has_subnodes = true;
-```
-
-## 文件结构要求
-
-工具假设目录节点遵循以下结构：
-
-```
-data_root/
-├── node1/
-│   ├── layout.md              # 可选：排版内容
-│   ├── visual_assets/         # 可选：图文资源目录
-│   │   ├── description.md     # 可选：文字说明
-│   │   └── image.jpg          # 可选：图片文件
-│   └── subnode/               # 可选：子节点
-└── node2/
-    └── ...
-```
-
-## 忽略文件配置
-
-在以下任一位置创建 `fileignore` 文件（使用 gitignore 语法）：
-
-1. `utils/node-generate-tool/fileignore` - 程序源码目录
-2. `target/release/fileignore` - 可执行程序目录
-3. `<扫描根目录>/fileignore` - 被扫描的根目录
-
-示例 `fileignore` 内容：
-```
-# 忽略构建目录
-target/
-node_modules/
-
-# 忽略隐藏目录
-.git/
-.vscode/
-
-# 忽略特定目录
-**/dist/
-**/build/
-```
-
-## 技术栈
-
-- **语言**: Rust
-- **依赖**:
-  - `clap`: 命令行参数解析
-  - `ignore`: 目录遍历和 gitignore 语法支持
-  - `anyhow`: 错误处理
-  - `pathdiff`: 路径计算
-
-## 注意事项
-
-- 工具只扫描目录，不扫描文件
-- 路径使用逗号分隔，便于在数据库中存储和查询
-- 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
-- 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
-- 文字文件识别 `.md` 和 `.markdown` 扩展名
-
-
-```
-
-已修改 `node-generate-tool`，将 `has_text` 和 `has_images` 从布尔值改为非负整数（文件数量）。
-
-## 主要改动
-
-### 1. 代码修改
-- 修改 `check_visual_assets_content` 函数，返回文件数量（`u32`）而不是布尔值
-- `has_text`: 统计 `.md` 文件的数量
-- `has_images`: 统计 `.png`、`.webp`、`.jpg` 文件的总数（只统计这三种格式）
-- 如果没有文件，返回 `0`
-
-### 2. 主逻辑更新
-- 将 `has_text` 和 `has_images` 从布尔值改为整数
-- CSV 输出格式已更新，输出数字而不是 `true/false`
-
-### 3. 文档更新
-- 更新 README，说明 `has_text` 和 `has_images` 现在是整数
-- 更新数据库表结构说明，将这两个字段改为 `INTEGER`
-- 更新查询示例，使用 `> 0` 而不是 `= true`
-
-## 新的输出格式
-
-CSV 文件现在会输出：
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-1_OnceAndOnceAgain.handmadeBook.Book.20230228_v1_0,false,true,0,5,false
-```
-
-其中：
-- `has_text`: 0（表示没有 .md 文件）或具体数量
-- `has_images`: 0（表示没有图片）或具体数量（只统计 png、webp、jpg）
-
-代码已编译通过，可以直接使用。重新运行工具后，生成的 CSV 文件中的 `has_text` 和 `has_images` 字段将显示文件数量。
-
-```csv
-path,has_layout,has_visual_assets,has_text,has_images,has_subnodes
-1_OnceAndOnceAgain.handmadeBook.Book.20230228_v1_0,false,true,0,5,false
-```
-
----
-
-**User**
-
-443端口是做什么用的
-
----
-
-**Cursor**
-
-443 端口是 HTTPS 的标准端口，用于加密的 HTTP 通信。
-
-## 主要用途
-
-1. HTTPS 协议：用于加密的网页访问
-   - 普通 HTTP 使用 80 端口（明文）
-   - HTTPS 使用 443 端口（TLS/SSL 加密）
-
-2. 常见应用场景：
-   - 网站安全访问（如 `https://example.com`）
-   - API 安全通信
-   - 在线支付、银行网站
-   - 需要加密传输的 Web 服务
-
-## 在你的项目中
-
-如果需要在你的网站中使用 HTTPS：
-- 配置 SSL/TLS 证书
-- 在 Nginx 中配置 443 端口监听
-- 将 HTTP（80）请求重定向到 HTTPS（443）
-
-## 端口对比
-
-- 80 端口：HTTP（明文传输）
-- 443 端口：HTTPS（加密传输）
-
-你的项目目前使用 80 端口（HTTP）。如果需要启用 HTTPS，需要：
-1. 获取 SSL 证书
-2. 配置 Nginx 监听 443 端口
-3. 设置证书路径
-
-需要我帮你配置 HTTPS 吗？
+_Exported on 10/11/2025 at 13:21:20 CET from Cursor (2.0.60)_
 
 ---
 
@@ -43444,9 +39014,7 @@ pub fn OverviewB(
 
 **Cursor**
 
-
 检查当前代码结构，按 ranger 风格重构键盘操作逻辑：
-
 
 
 按 ranger 风格重构键盘操作逻辑，并添加必要功能：
@@ -43842,7 +39410,6 @@ fn handle_go_back(
 }
 
 ```
-
 
 更新相关组件以支持高亮和正确的滚动条：
 
@@ -44726,7 +40293,6 @@ pub fn OverviewB(
 }
 
 ```
-
 
 修复信号传递问题，并更新鼠标处理器以支持高亮：
 
@@ -45950,7 +41516,6 @@ pub fn OverviewB(
 
 ```
 
-
 修复编译错误：
 
 
@@ -46054,7 +41619,6 @@ pub fn handle_node_click(
 
 
 ```
-
 
 修复 overview_a.rs 中的错误：
 
@@ -46278,9 +41842,7 @@ pub fn OverviewA(
 
 ```
 
-
 编译通过。检查滚动条设置，并删除多余代码：
-
 
 
 滚动条设置已正确。总结已完成的重构：
@@ -46330,9 +41892,7 @@ pub fn OverviewA(
 
 **Cursor**
 
-
 在关键交互步骤添加 console 调试输出，便于调试：
-
 
 
 在关键交互步骤添加 console 调试输出：
@@ -49970,7 +45530,6 @@ pub fn handle_node_click(
 
 ```
 
-
 为 `overview_b.rs` 中的数据加载添加调试信息：
 
 
@@ -51280,7 +46839,6 @@ pub fn OverviewB(
 
 ```
 
-
 编译通过。已在所有关键交互步骤添加 console 调试信息。
 
 ## 添加的调试信息总结
@@ -51329,13 +46887,10 @@ pub fn OverviewB(
 
 **Cursor**
 
-
 检查返回父节点时的索引定位逻辑：
 
 
-
 检查并修复返回父节点时的索引定位问题。可能是 effect 与索引设置的时序问题：
-
 
 
 问题在于：`overview_b.rs` 中的 effect 在 `directories` 改变时会重置索引，与 `keyboard_handlers.rs` 中的索引设置产生竞态。修复：先设置索引，再设置 directories，或调整 effect 逻辑以避免冲突。
@@ -52120,7 +47675,6 @@ pub fn OverviewB(
 
 ```
 
-
 已修复返回父节点时的索引定位问题。
 
 ## 修复内容
@@ -52239,13 +47793,10 @@ TheTempleProject-a893aca5c23b2afa.js:689 [OverviewB] 选中索引改变，更新
 
 **Cursor**
 
-
 检查返回父级节点时目标路径错误的原因：
 
 
-
 问题：返回父级时，目标路径应为 `1_OnceAndOnceAgain.programing`（OverviewA 的最后一个节点），但实际是 `1_OnceAndOnceAgain.textile`。检查并修复：
-
 
 
 问题：返回父级时使用了 `overview_a_directories.last()`，但应使用 `overview_a_selected_path`（进入节点时设置的父级高亮路径）。修复：改用 `overview_a_selected_path` 作为目标路径。
@@ -54501,9 +50052,7 @@ pub fn OverviewB(
 
 ```
 
-
 检查 `overview_b.rs` 中是否需要添加 `overview_a_selected_path` 的 ReadSignal：
-
 
 
 添加 `overview_a_selected_path` 的 ReadSignal 到 `overview_b.rs`：
@@ -54918,9 +50467,7 @@ pub fn Home() -> impl IntoView {
 
 ```
 
-
 检查并修复语法错误：
-
 
 
 修复缩进问题：
@@ -55512,7 +51059,6 @@ fn handle_go_back(
 
 ```
 
-
 编译通过。已修复返回父级节点时目标路径错误的问题。
 
 ## 修复内容
@@ -55547,4 +51093,4987 @@ if let Some(parent_path) = overview_a_selected_path {
     // ... 使用 path_to_select 进行后续操作
 }
 ```
+
+---
+
+**User**
+
+能否会实现一件事，目前的hjkl操作要焦点在overviewB上才可以，能不能让这个操作成为网页的全局操作？
+
+---
+
+**Cursor**
+
+检查当前代码结构，准备将 hjkl 操作改为全局：
+
+
+检查 `overview_b.rs` 中 `directories` 的使用情况：
+
+
+将 hjkl 操作改为全局，需要：
+
+1. 将 `directories` 状态提升到 `home.rs`（键盘处理需要访问它）
+2. 将键盘事件监听器移到 `home.rs` 的根元素上
+3. 添加逻辑：当焦点在输入框等元素上时，不处理 hjkl 键
+
+修改方案：
+
+## 1. 修改 `home.rs` - 添加全局键盘事件监听器
+
+```rust:frontend/src/pages/home.rs
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use web_sys::console;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || active_element.has_attribute("contenteditable").unwrap_or(false)
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen overflow-hidden"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+```
+
+## 2. 修改 `overview_b.rs` - 使用传入的 `directories` 状态
+
+```rust:frontend/src/components/overview_b.rs
+// ... existing code ...
+
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,  // 新增：从外部传入
+    set_directories: WriteSignal<Vec<DirectoryNode>>,  // 新增：从外部传入
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 移除本地 directories 状态，使用传入的
+    // let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    
+    // ... existing code ...
+
+    // 移除键盘事件处理函数和 ul 的 focus 逻辑
+    // 因为现在在 home.rs 中全局处理
+
+    view! {
+        <ul 
+            class="text-2xl text-gray-500 outline-none"
+            // 移除 tabindex 和 on:keydown，因为现在在全局处理
+        >
+            // ... existing code ...
+        </ul>
+    }
+}
+```
+
+## 3. 移除 `overview_b.rs` 中的自动聚焦逻辑
+
+移除以下代码：
+- `ul_ref` 和相关的 `create_effect`（自动聚焦逻辑）
+- `handle_keydown` 函数
+- `<ul>` 上的 `on:keydown`、`tabindex`、`on:focus` 属性
+
+## 主要改动
+
+1. 将 `directories` 状态提升到 `home.rs`，供全局键盘事件使用
+2. 在 `home.rs` 的根 `<div>` 上添加 `on:keydown` 和 `tabindex="0"`
+3. 添加焦点检查：焦点在输入框/文本区域时不处理 hjkl
+4. 移除 `overview_b.rs` 中的键盘事件监听器和自动聚焦逻辑
+
+这样，hjkl 操作在页面任意位置都可用，除非焦点在输入框等元素上。
+
+需要我应用这些修改吗？请切换到 agent 模式。
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use web_sys::console;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || active_element.has_attribute("contenteditable").unwrap_or(false)
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen overflow-hidden"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+```
+
+```rust
+// ... existing code ...
+
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,  // 新增：从外部传入
+    set_directories: WriteSignal<Vec<DirectoryNode>>,  // 新增：从外部传入
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 移除本地 directories 状态，使用传入的
+    // let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    
+    // ... existing code ...
+
+    // 移除键盘事件处理函数和 ul 的 focus 逻辑
+    // 因为现在在 home.rs 中全局处理
+
+    view! {
+        <ul 
+            class="text-2xl text-gray-500 outline-none"
+            // 移除 tabindex 和 on:keydown，因为现在在全局处理
+        >
+            // ... existing code ...
+        </ul>
+    }
+}
+```
+
+---
+
+**User**
+
+对的，帮我将键盘的控制改成全局模式
+
+---
+
+**Cursor**
+
+
+检查相关文件，准备将键盘控制改为全局模式。
+
+
+
+将键盘控制改为全局模式：将 `directories` 状态提升到 `home.rs`，并在根元素上添加全局键盘事件监听器。
+
+
+
+修改 `home.rs`，添加全局键盘事件监听器：
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    view! {
+        <div class="flex flex-col h-screen overflow-hidden">
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || active_element.has_attribute("contenteditable").unwrap_or(false)
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div class="flex flex-col h-screen overflow-hidden">
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || active_element.has_attribute("contenteditable").unwrap_or(false)
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen overflow-hidden"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || active_element.has_attribute("contenteditable").unwrap_or(false)
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen overflow-hidden"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+修改 `overview_b.rs`，使用传入的 `directories` 状态，并移除本地键盘事件处理：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（用于返回导航）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 高亮路径的函数
+/// - `directories`: 当前目录的完整信息（从外部传入，供全局键盘事件使用）
+/// - `set_directories`: 设置目录信息的函数
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理函数 - 委托给 keyboard_handlers 模块
+    let handle_keydown = move |event: KeyboardEvent| {
+            keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（用于返回导航）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 高亮路径的函数
+/// - `directories`: 当前目录的完整信息（从外部传入，供全局键盘事件使用）
+/// - `set_directories`: 设置目录信息的函数
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理已移至 home.rs 的全局监听器
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 使用 NodeRef 来在组件挂载时聚焦到 ul 元素
+    // 聚焦后，ul 元素可以接收键盘事件（j/k/l/h 键）
+    let ul_ref = NodeRef::<leptos::html::Ul>::new();
+    
+    // 当 directories 加载完成时，自动聚焦到 ul 元素
+    // 使用 requestAnimationFrame 确保 DOM 已渲染
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 使用 requestAnimationFrame 确保 DOM 已渲染
+            if let Some(window) = web_sys::window() {
+                let ul_ref_clone = ul_ref.clone();
+                let closure = Closure::once_into_js(move || {
+                    if let Some(ul) = ul_ref_clone.get() {
+                        let _ = ul.focus();
+                    }
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+            }
+        }
+    });
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（用于返回导航）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 高亮路径的函数
+/// - `directories`: 当前目录的完整信息（从外部传入，供全局键盘事件使用）
+/// - `set_directories`: 设置目录信息的函数
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理已移至 home.rs 的全局监听器
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 自动聚焦逻辑已移除，键盘事件现在在 home.rs 中全局处理
+
+    view! {
+        <ul 
+            node_ref=ul_ref
+            class="text-2xl text-gray-500 outline-none focus:outline-none"
+            tabindex="0"
+            on:keydown=handle_keydown
+            on:focus=move |_| {
+                // 当元素获得焦点时，确保有选中的索引
+                // 如果没有选中索引且目录列表不为空，则默认选中第一个
+                if selected_index.get().is_none() && !directories.get().is_empty() {
+                    set_selected_index.set(Some(0));
+                }
+            }
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use web_sys::console;
+
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（用于返回导航）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 高亮路径的函数
+/// - `directories`: 当前目录的完整信息（从外部传入，供全局键盘事件使用）
+/// - `set_directories`: 设置目录信息的函数
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理已移至 home.rs 的全局监听器
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 自动聚焦逻辑已移除，键盘事件现在在 home.rs 中全局处理
+
+    view! {
+        <ul 
+            class="text-2xl text-gray-500 outline-none"
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// OverviewB 组件：显示当前层级的目录列表
+/// 
+/// # 功能
+/// - 显示当前层级的目录列表
+/// - 支持鼠标点击导航
+/// - 支持键盘导航（j/k/l/h 键）
+/// - 支持 Shift+J/K 滚动 Preview
+/// - 自动聚焦以接收键盘事件
+/// 
+/// # 参数
+/// - `overview_b_directories`: 当前层级的目录路径列表（字符串）
+/// - `set_overview_b_directories`: 设置当前层级目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `selected_path`: 当前选中的路径（用于高亮显示）
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `selected_index`: 当前选中的索引（用于键盘导航）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `overview_a_directories`: OverviewA 的目录列表（用于返回导航）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（用于返回导航）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 高亮路径的函数
+/// - `directories`: 当前目录的完整信息（从外部传入，供全局键盘事件使用）
+/// - `set_directories`: 设置目录信息的函数
+/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
+#[component]
+pub fn OverviewB(
+    overview_b_directories: ReadSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    selected_path: ReadSignal<Option<String>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    selected_index: ReadSignal<Option<usize>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    overview_a_directories: ReadSignal<Vec<String>>,
+    overview_a_selected_path: ReadSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    directories: ReadSignal<Vec<DirectoryNode>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) -> impl IntoView {
+    // 加载状态
+    let (loading, set_loading) = signal(false);
+    // 错误信息
+    let (error, set_error) = signal::<Option<String>>(None);
+
+    // 当 directories 改变时，如果索引未设置或超出范围，则重置为 0
+    // 注意：这个 effect 不应该覆盖已经正确设置的索引（比如返回父级节点时）
+    create_effect(move |_| {
+        let dirs = directories.get();
+        if !dirs.is_empty() {
+            // 如果当前索引超出范围或未设置，则重置为 0
+            if let Some(current_idx) = selected_index.get() {
+                if current_idx >= dirs.len() {
+                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
+                    console::log_2(&"[OverviewB] 列表长度:".into(), &dirs.len().into());
+                    set_selected_index.set(Some(0));
+                }
+            } else {
+                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
+                set_selected_index.set(Some(0));
+            }
+        }
+    });
+
+    // 当选中索引改变时，更新 Preview 显示的内容
+    create_effect(move |_| {
+        if let Some(index) = selected_index.get() {
+            let dirs = directories.get();
+            if let Some(dir) = dirs.get(index) {
+                // 设置选中的路径（用于高亮显示）
+                set_selected_path.set(Some(dir.path.clone()));
+                
+                // 只有当节点有子节点时才更新 Preview
+                if dir.has_subnodes {
+                    console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &dir.path.clone().into());
+                    set_preview_path.set(Some(dir.path.clone()));
+                } else {
+                    console::log_2(&"[OverviewB] 选中索引改变，节点无子节点:".into(), &dir.path.clone().into());
+                    set_preview_path.set(None);
+                }
+            }
+        }
+    });
+
+    // 键盘事件处理已移至 home.rs 的全局监听器
+
+    // 当 overview_b_directories 改变时，从 API 加载对应的完整目录信息
+    // 这个 effect 负责将路径列表转换为包含完整信息的 DirectoryNode 列表
+    create_effect(move |_| {
+        let dir_paths = overview_b_directories.get();
+        let dir_paths_clone = dir_paths.clone();
+        
+        spawn_local(async move {
+            if dir_paths_clone.is_empty() {
+                // 初始加载一级目录
+                console::log_1(&"[OverviewB] 初始加载一级目录".into());
+                set_loading.set(true);
+                set_error.set(None);
+
+                match Request::get("/api/directories/root").send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                            Err(e) => {
+                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                set_error.set(Some(format!("解析错误: {e}")));
+                                set_loading.set(false);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_loading.set(false);
+                    }
+                }
+            } else {
+                // 根据路径列表，获取父路径，然后加载兄弟节点
+                if let Some(first_path) = dir_paths_clone.first() {
+                    console::log_2(&"[OverviewB] 加载目录信息，第一个路径:".into(), &first_path.clone().into());
+                    // 获取父路径
+                    let parent_path = if first_path.contains('.') {
+                        let parts: Vec<&str> = first_path.split('.').collect();
+                        if parts.len() > 1 {
+                            Some(parts[0..parts.len()-1].join("."))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    set_loading.set(true);
+                    set_error.set(None);
+                    
+                    let url = if let Some(p) = parent_path {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
+                                set_directories.set(data.directories.clone());
+                                
+                                // 设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
+                                }
+                                set_loading.set(false);
+                            }
+                                Err(e) => {
+                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
+                                    set_error.set(Some(format!("解析错误: {e}")));
+                                    set_loading.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
+                            set_error.set(Some(format!("请求失败: {e}")));
+                            set_loading.set(false);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // 自动聚焦逻辑已移除，键盘事件现在在 home.rs 中全局处理
+
+    view! {
+        <ul 
+            class="text-2xl text-gray-500 outline-none"
+        >
+            <Show
+                when=move || loading.get()
+                fallback=move || {
+                    view! {
+                        <Show
+                            when=move || error.get().is_some()
+                            fallback=move || {
+                                view! {
+                                    <For
+                                        each=move || directories.get()
+                                        key=|dir| dir.path.clone()
+                                        children=move |dir: DirectoryNode| {
+                                            // 提取目录信息
+                                            let path = dir.path.clone();
+                                            let path_for_selected = path.clone();
+                                            let has_subnodes = dir.has_subnodes;
+                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
+                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            
+                                            // 判断当前节点是否被选中（用于高亮显示）
+                                            let is_selected = move || {
+                                                if let Some(index) = selected_index.get() {
+                                                    let dirs = directories.get();
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                        index == dir_idx
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                }
+                                            };
+                                            
+                                            view! {
+                                                <li>
+                                                    <button
+                                                        class=move || {
+                                                            if is_selected() {
+                                                                "w-full h-full text-left text-white bg-gray-800"
+                                                            } else {
+                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400"
+                                                            }
+                                                        }
+                                                        on:click=move |_| {
+                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
+                                                            crate::components::mouse_handlers::handle_node_click(
+                                                                path.clone(),
+                                                                has_subnodes,
+                                                                directories.get(),
+                                                                set_overview_a_directories,
+                                                                set_overview_a_selected_path,
+                                                                set_overview_b_directories,
+                                                                set_preview_path,
+                                                                set_selected_path,
+                                                                set_selected_index,
+                                                            );
+                                                        }
+                                                    >
+                                                        {display_name}
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                }
+                            }
+                        >
+                            <li class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</li>
+                        </Show>
+                    }
+                }
+            >
+                <li>"加载中..."</li>
+            </Show>
+        </ul>
+    }
+}
+
+```
+
+
+检查并修复剩余问题：
+
+
+
+检查编译错误：
+
+
+
+运行 cargo check 验证编译是否通过：
+
+
+
+查看完整的编译错误信息：
+
+
+
+修复 `has_attribute` 的用法：它返回 `Result<bool, JsValue>`，不是 `bool`。
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            let is_contenteditable = active_element.has_attribute("contenteditable")
+                .map(|attr| attr == "true")
+                .unwrap_or(false);
+            
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || is_contenteditable
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen overflow-hidden"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+再次检查编译错误：
+
+
+
+查看完整的错误信息：
+
+
+
+检查 `has_attribute` 的返回值类型：
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            let is_contenteditable = active_element.has_attribute("contenteditable");
+            
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || is_contenteditable
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen overflow-hidden"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+编译通过。检查未使用的变量警告：
+
+
+
+这些变量在 `handle_node_click` 中被使用，警告可能是误报。检查实际使用情况：
+
+
+
+这些变量在闭包中被使用，警告可能是误报。先验证主要功能是否正常。总结已完成的修改：
+
+
+
+已将键盘控制改为全局模式。主要修改如下：
+
+## 完成的修改
+
+### 1. **`home.rs`** - 添加全局键盘事件监听器
+- 将 `directories` 状态提升到 `home.rs`，供全局键盘事件使用
+- 在根 `<div>` 上添加 `on:keydown` 和 `tabindex="0"`
+- 添加焦点检查：焦点在 `INPUT`、`TEXTAREA` 或 `contenteditable` 元素上时不处理 hjkl 键
+
+### 2. **`overview_b.rs`** - 移除本地键盘事件处理
+- 移除本地的 `directories` 状态，改为使用从 `home.rs` 传入的
+- 移除键盘事件处理函数 `handle_keydown`
+- 移除 `ul_ref` 和自动聚焦逻辑
+- 移除 `<ul>` 上的 `on:keydown`、`tabindex`、`on:focus` 属性
+
+## 功能说明
+
+现在 hjkl 键盘操作在页面任意位置都可用，无需先聚焦到 `OverviewB`。当焦点在输入框、文本区域或可编辑元素上时，hjkl 键不会被拦截，允许正常输入。
+
+编译已通过，可以测试。如果遇到问题，请告诉我。
+
+---
+
+**User**
+
+现在的问题是，当我聚焦在view块中的时候，键盘控制就不好使了，这样也是不对的，我需要无论聚焦在哪里都可以实现这个功能
+
+---
+
+**Cursor**
+
+
+根 `<div>` 失去焦点时，`on:keydown` 无法捕获事件。改为在 `window` 上监听键盘事件，实现全局键盘控制。检查如何实现：
+
+
+
+改用 `window` 上的全局键盘事件监听器，确保无论焦点在哪里都能捕获键盘事件。
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 全局键盘事件处理函数
+    let handle_global_keydown = move |event: KeyboardEvent| {
+        // 检查当前焦点是否在输入框、文本区域等元素上
+        // 如果是，则不处理 hjkl 键，让用户正常输入
+        if let Some(active_element) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.active_element())
+        {
+            let tag_name = active_element.tag_name();
+            let node_name = active_element.node_name();
+            
+            // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+            let is_contenteditable = active_element.has_attribute("contenteditable");
+            
+            if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                || is_contenteditable
+                || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                return;
+            }
+        }
+
+        // 处理键盘导航
+        keyboard_handlers::handle_keyboard_navigation(
+            event,
+            directories.get(),
+            selected_index.get(),
+            overview_a_directories.get(),
+            overview_a_selected_path.get(),
+            set_selected_index,
+            set_selected_path,
+            set_overview_a_selected_path,
+            set_overview_a_directories,
+            set_overview_b_directories,
+            set_preview_path,
+            set_directories,
+            preview_scroll_ref,
+        );
+    };
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 在 window 上添加全局键盘事件监听器
+    // 这样无论焦点在哪里，都能捕获键盘事件
+    on_mount(move || {
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 检查当前焦点是否在输入框、文本区域等元素上
+            // 如果是，则不处理 hjkl 键，让用户正常输入
+            if let Some(active_element) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag_name = active_element.tag_name();
+                let node_name = active_element.node_name();
+                
+                // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+                let is_contenteditable = active_element.has_attribute("contenteditable");
+                
+                if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                    || is_contenteditable
+                    || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                    return;
+                }
+            }
+
+            // 将 web_sys::KeyboardEvent 转换为 leptos::ev::KeyboardEvent
+            // 创建一个包装器来处理事件
+            let key = event.key();
+            let shift_pressed = event.shift_key();
+            
+            // 只处理 hjkl 键（带或不带 Shift）
+            let should_handle = match key.as_str() {
+                "j" | "J" | "k" | "K" | "l" | "L" | "h" | "H" => true,
+                _ => false,
+            };
+            
+            if !should_handle {
+                return;
+            }
+            
+            // 阻止默认行为和事件冒泡
+            event.prevent_default();
+            event.stop_propagation();
+            
+            // 处理键盘导航
+            keyboard_handlers::handle_keyboard_navigation(
+                &event, // 传递原始事件，keyboard_handlers 会处理
+                directories.get(),
+                selected_index.get(),
+                overview_a_directories.get(),
+                overview_a_selected_path.get(),
+                set_selected_index,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_overview_b_directories,
+                set_preview_path,
+                set_directories,
+                preview_scroll_ref,
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        // 在 window 上添加事件监听器
+        if let Some(window) = web_sys::window() {
+            window
+                .add_event_listener_with_callback(
+                    "keydown",
+                    handle_global_keydown.as_ref().unchecked_ref(),
+                )
+                .expect("无法添加键盘事件监听器");
+
+            // 保存闭包的引用，防止被释放
+            handle_global_keydown.forget();
+        }
+    });
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+            on:keydown=handle_global_keydown
+            tabindex="0"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+修改 `keyboard_handlers.rs` 以接受 `web_sys::KeyboardEvent`，并移除 `home.rs` 中不再需要的 `on:keydown` 和 `tabindex`。
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 在 window 上添加全局键盘事件监听器
+    // 这样无论焦点在哪里，都能捕获键盘事件
+    on_mount(move || {
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 检查当前焦点是否在输入框、文本区域等元素上
+            // 如果是，则不处理 hjkl 键，让用户正常输入
+            if let Some(active_element) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag_name = active_element.tag_name();
+                let node_name = active_element.node_name();
+                
+                // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+                let is_contenteditable = active_element.has_attribute("contenteditable");
+                
+                if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                    || is_contenteditable
+                    || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                    return;
+                }
+            }
+
+            // 将 web_sys::KeyboardEvent 转换为 leptos::ev::KeyboardEvent
+            // 创建一个包装器来处理事件
+            let key = event.key();
+            let shift_pressed = event.shift_key();
+            
+            // 只处理 hjkl 键（带或不带 Shift）
+            let should_handle = match key.as_str() {
+                "j" | "J" | "k" | "K" | "l" | "L" | "h" | "H" => true,
+                _ => false,
+            };
+            
+            if !should_handle {
+                return;
+            }
+            
+            // 阻止默认行为和事件冒泡
+            event.prevent_default();
+            event.stop_propagation();
+            
+            // 处理键盘导航
+            keyboard_handlers::handle_keyboard_navigation(
+                &event, // 传递原始事件，keyboard_handlers 会处理
+                directories.get(),
+                selected_index.get(),
+                overview_a_directories.get(),
+                overview_a_selected_path.get(),
+                set_selected_index,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_overview_b_directories,
+                set_preview_path,
+                set_directories,
+                preview_scroll_ref,
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        // 在 window 上添加事件监听器
+        if let Some(window) = web_sys::window() {
+            window
+                .add_event_listener_with_callback(
+                    "keydown",
+                    handle_global_keydown.as_ref().unchecked_ref(),
+                )
+                .expect("无法添加键盘事件监听器");
+
+            // 保存闭包的引用，防止被释放
+            handle_global_keydown.forget();
+        }
+    });
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+修改 `keyboard_handlers.rs` 以接受 `web_sys::KeyboardEvent`：
+
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            handle_go_back(
+                &overview_a_directories,
+                overview_a_selected_path,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    overview_a_selected_path: Option<String>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    // 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+    // 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+    if let Some(parent_path) = overview_a_selected_path {
+        let path_to_select = parent_path.clone();
+        console::log_2(&"[返回父级] 目标路径（来自 overview_a_selected_path）:".into(), &path_to_select.clone().into());
+        
+        // 获取父路径（上一级）
+        let grandparent_path = if path_to_select.contains('.') {
+            let parts: Vec<&str> = path_to_select.split('.').collect();
+            if parts.len() > 1 {
+                Some(parts[0..parts.len()-1].join("."))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // 设置 OverviewA 中高亮的路径（父级的父级）
+        if let Some(ref gp) = grandparent_path {
+            console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+            set_overview_a_selected_path.set(Some(gp.clone()));
+        } else {
+            console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+            set_overview_a_selected_path.set(None);
+        }
+        
+        // 设置 Preview 显示父级节点的子节点
+        let path_for_preview = path_to_select.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_for_preview);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            if !data.directories.is_empty() {
+                                set_preview_path.set(Some(path_for_preview.clone()));
+                            } else {
+                                set_preview_path.set(None);
+                            }
+                        }
+                        Err(_) => {
+                            set_preview_path.set(None);
+                        }
+                    }
+                }
+                Err(_) => {
+                    set_preview_path.set(None);
+                }
+            }
+        });
+        
+        // 加载兄弟节点到 OverviewB（父级节点的子节点）
+        let parent_for_b = grandparent_path.clone();
+        let path_to_select_clone = path_to_select.clone();
+        spawn_local(async move {
+            let url = if let Some(p) = parent_for_b {
+                let encoded_path = urlencoding::encode(&p);
+                format!("/api/directories/children/{}", encoded_path)
+            } else {
+                "/api/directories/root".to_string()
+            };
+            console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                            
+                            // 先定位到之前选中的节点（父级节点），再设置 directories
+                            // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                            let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                Some(index)
+                            } else {
+                                console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                Some(0)
+                            };
+                            
+                            // 先设置索引，避免 effect 重置
+                            if let Some(idx) = target_index {
+                                set_selected_index.set(Some(idx));
+                                set_selected_path.set(Some(path_to_select_clone.clone()));
+                            }
+                            
+                            // 然后设置 directories 和 overview_b_directories
+                            set_overview_b_directories.set(dir_paths);
+                            set_directories.set(data.directories.clone());
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+        
+        // 加载上一级节点到 OverviewA
+        if let Some(ref gp) = grandparent_path {
+            let parent_for_a = if gp.contains('.') {
+                let parts: Vec<&str> = gp.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_a {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_a_directories.set(dir_paths);
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        } else {
+            // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+            set_overview_a_directories.set(Vec::new());
+        }
+    } else if !overview_a_directories.is_empty() {
+        // 如果 overview_a_selected_path 为空，但 overview_a_directories 不为空，使用最后一个节点作为后备
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径（后备，来自 overview_a_directories.last）:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+```rust
+use gloo_net::http::Request;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::{Deserialize, Serialize};
+use web_sys::console;
+
+use crate::components::mouse_handlers::DirectoryNode;
+
+/// API 响应数据结构
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoriesResponse {
+    directories: Vec<DirectoryNode>,
+}
+
+/// 处理键盘导航事件（模仿 ranger 的导航方式）
+/// 
+/// # 键盘操作
+/// - `j`: 向下移动光标（在 OverviewB 中）
+/// - `k`: 向上移动光标（在 OverviewB 中）
+/// - `l`: 进入子级节点
+/// - `h`: 返回父级节点
+/// - `Shift+J`: 向下滚动 Preview
+/// - `Shift+K`: 向上滚动 Preview
+/// 
+/// # 参数
+/// - `event`: 键盘事件
+/// - `directories`: 当前目录列表（OverviewB）
+/// - `selected_index`: 当前选中的索引（OverviewB）
+/// - `overview_a_directories`: OverviewA 的目录列表（父级节点）
+/// - `overview_a_selected_path`: OverviewA 中高亮的路径（当前节点的父级）
+/// - `set_selected_index`: 设置选中索引的函数
+/// - `set_selected_path`: 设置选中路径的函数（OverviewB）
+/// - `set_overview_a_selected_path`: 设置 OverviewA 中高亮路径的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 路径的函数
+/// - `set_directories`: 设置 directories 的函数（用于返回时定位）
+/// - `preview_scroll_ref`: Preview 滚动容器的引用
+pub fn handle_keyboard_navigation(
+    event: &web_sys::KeyboardEvent,
+    directories: Vec<DirectoryNode>,
+    selected_index: Option<usize>,
+    overview_a_directories: Vec<String>,
+    overview_a_selected_path: Option<String>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+    preview_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let key = event.key();
+    let shift_pressed = event.shift_key();
+    
+    // 处理 Shift+J 和 Shift+K 滚动 Preview
+    if shift_pressed {
+        match key.as_str() {
+            "J" | "j" => {
+                console::log_1(&"[键盘] Shift+J: 向下滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_down(&preview_scroll_ref);
+            }
+            "K" | "k" => {
+                console::log_1(&"[键盘] Shift+K: 向上滚动 Preview".into());
+                event.prevent_default();
+                event.stop_propagation();
+                scroll_preview_up(&preview_scroll_ref);
+            }
+            _ => {}
+        }
+        return;
+    }
+    
+    // 只处理 j/k/l/h 键（不带 Shift）
+    match key.as_str() {
+        "j" | "k" | "l" | "h" => {
+            event.prevent_default();
+            event.stop_propagation();
+        }
+        _ => {
+            return;
+        }
+    }
+    
+    if directories.is_empty() {
+        return;
+    }
+    
+    let current_index = selected_index.unwrap_or(0);
+    let max_index = directories.len() - 1;
+    
+    match key.as_str() {
+        "j" => {
+            // 向下移动光标（在 OverviewB 中）
+            let new_index = if current_index < max_index {
+                current_index + 1
+            } else {
+                max_index
+            };
+            console::log_2(&"[键盘] j: 向下移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "k" => {
+            // 向上移动光标（在 OverviewB 中）
+            let new_index = if current_index > 0 {
+                current_index - 1
+            } else {
+                0
+            };
+            console::log_2(&"[键盘] k: 向上移动".into(), &format!("索引: {} -> {}", current_index, new_index).into());
+            set_selected_index.set(Some(new_index));
+        }
+        "l" => {
+            // 进入子级节点
+            console::log_1(&"[键盘] l: 进入子级节点".into());
+            if let Some(dir) = directories.get(current_index) {
+                console::log_2(&"  目标路径:".into(), &dir.path.clone().into());
+            }
+            handle_enter_node(
+                current_index,
+                &directories,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_preview_path,
+                set_overview_b_directories,
+                set_selected_index,
+            );
+        }
+        "h" => {
+            // 返回父级节点
+            console::log_1(&"[键盘] h: 返回父级节点".into());
+            handle_go_back(
+                &overview_a_directories,
+                overview_a_selected_path,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_preview_path,
+                set_overview_b_directories,
+                set_overview_a_directories,
+                set_selected_index,
+                set_directories,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// 向下滚动 Preview
+fn scroll_preview_down(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let max_scroll = (container.scroll_height() - container.client_height()) as f64;
+        let new_scroll = (current_scroll + scroll_amount).min(max_scroll);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 向上滚动 Preview
+fn scroll_preview_up(preview_scroll_ref: &NodeRef<leptos::html::Div>) {
+    if let Some(container) = preview_scroll_ref.get() {
+        let scroll_amount = 100.0;
+        let current_scroll = container.scroll_top() as f64;
+        let new_scroll = (current_scroll - scroll_amount).max(0.0);
+        container.set_scroll_top(new_scroll as i32);
+    }
+}
+
+/// 处理进入节点（l 键）
+/// 进入子级节点时，OverviewA 中的父级节点要高亮显示
+fn handle_enter_node(
+    current_index: usize,
+    directories: &[DirectoryNode],
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    if let Some(dir) = directories.get(current_index) {
+        if dir.has_subnodes {
+            let current_path = dir.path.clone();
+            console::log_2(&"[进入节点] 路径:".into(), &current_path.clone().into());
+            
+            // 设置 OverviewB 中选中的路径
+            set_selected_path.set(Some(current_path.clone()));
+            
+            // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
+            let current_dirs: Vec<String> = directories.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
+            set_overview_a_directories.set(current_dirs);
+            
+            // 高亮 OverviewA 中的当前节点（作为父级）
+            set_overview_a_selected_path.set(Some(current_path.clone()));
+            console::log_2(&"[进入节点] OverviewA 高亮路径:".into(), &current_path.clone().into());
+            
+            // 设置 Preview 显示被点击节点的子节点
+            set_preview_path.set(Some(current_path.clone()));
+            
+            // 加载被点击节点的子目录到 OverviewB
+            let path_clone = current_path.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_clone);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
+                                set_overview_b_directories.set(dir_paths);
+                                // 重置选中索引为 0
+                                set_selected_index.set(Some(0));
+                            }
+                            Err(e) => {
+                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+        } else {
+            console::log_1(&"[进入节点] 节点没有子节点，无法进入".into());
+        }
+    }
+}
+
+/// 处理返回父级节点（h 键）
+/// 后退到父级节点时，光标要在高亮的节点上
+fn handle_go_back(
+    overview_a_directories: &[String],
+    overview_a_selected_path: Option<String>,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_a_selected_path: WriteSignal<Option<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+    set_directories: WriteSignal<Vec<DirectoryNode>>,
+) {
+    // 使用 overview_a_selected_path 作为目标路径（当前节点的父级）
+    // 这是进入节点时设置的，比 overview_a_directories.last() 更准确
+    if let Some(parent_path) = overview_a_selected_path {
+        let path_to_select = parent_path.clone();
+        console::log_2(&"[返回父级] 目标路径（来自 overview_a_selected_path）:".into(), &path_to_select.clone().into());
+        
+        // 获取父路径（上一级）
+        let grandparent_path = if path_to_select.contains('.') {
+            let parts: Vec<&str> = path_to_select.split('.').collect();
+            if parts.len() > 1 {
+                Some(parts[0..parts.len()-1].join("."))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // 设置 OverviewA 中高亮的路径（父级的父级）
+        if let Some(ref gp) = grandparent_path {
+            console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+            set_overview_a_selected_path.set(Some(gp.clone()));
+        } else {
+            console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+            set_overview_a_selected_path.set(None);
+        }
+        
+        // 设置 Preview 显示父级节点的子节点
+        let path_for_preview = path_to_select.clone();
+        spawn_local(async move {
+            let encoded_path = urlencoding::encode(&path_for_preview);
+            let url = format!("/api/directories/children/{}", encoded_path);
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            if !data.directories.is_empty() {
+                                set_preview_path.set(Some(path_for_preview.clone()));
+                            } else {
+                                set_preview_path.set(None);
+                            }
+                        }
+                        Err(_) => {
+                            set_preview_path.set(None);
+                        }
+                    }
+                }
+                Err(_) => {
+                    set_preview_path.set(None);
+                }
+            }
+        });
+        
+        // 加载兄弟节点到 OverviewB（父级节点的子节点）
+        let parent_for_b = grandparent_path.clone();
+        let path_to_select_clone = path_to_select.clone();
+        spawn_local(async move {
+            let url = if let Some(p) = parent_for_b {
+                let encoded_path = urlencoding::encode(&p);
+                format!("/api/directories/children/{}", encoded_path)
+            } else {
+                "/api/directories/root".to_string()
+            };
+            console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+            
+            match Request::get(&url).send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                            
+                            // 先定位到之前选中的节点（父级节点），再设置 directories
+                            // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                            let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                Some(index)
+                            } else {
+                                console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                Some(0)
+                            };
+                            
+                            // 先设置索引，避免 effect 重置
+                            if let Some(idx) = target_index {
+                                set_selected_index.set(Some(idx));
+                                set_selected_path.set(Some(path_to_select_clone.clone()));
+                            }
+                            
+                            // 然后设置 directories 和 overview_b_directories
+                            set_overview_b_directories.set(dir_paths);
+                            set_directories.set(data.directories.clone());
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+        
+        // 加载上一级节点到 OverviewA
+        if let Some(ref gp) = grandparent_path {
+            let parent_for_a = if gp.contains('.') {
+                let parts: Vec<&str> = gp.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_a {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                set_overview_a_directories.set(dir_paths);
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        } else {
+            // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+            set_overview_a_directories.set(Vec::new());
+        }
+    } else if !overview_a_directories.is_empty() {
+        // 如果 overview_a_selected_path 为空，但 overview_a_directories 不为空，使用最后一个节点作为后备
+        if let Some(parent_path) = overview_a_directories.last() {
+            let path_to_select = parent_path.clone();
+            console::log_2(&"[返回父级] 目标路径（后备，来自 overview_a_directories.last）:".into(), &path_to_select.clone().into());
+            
+            // 获取父路径（上一级）
+            let grandparent_path = if path_to_select.contains('.') {
+                let parts: Vec<&str> = path_to_select.split('.').collect();
+                if parts.len() > 1 {
+                    Some(parts[0..parts.len()-1].join("."))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // 设置 OverviewA 中高亮的路径（父级的父级）
+            if let Some(ref gp) = grandparent_path {
+                console::log_2(&"[返回父级] OverviewA 高亮路径:".into(), &gp.clone().into());
+                set_overview_a_selected_path.set(Some(gp.clone()));
+            } else {
+                console::log_1(&"[返回父级] OverviewA 高亮路径: None (根节点)".into());
+                set_overview_a_selected_path.set(None);
+            }
+            
+            // 设置 Preview 显示父级节点的子节点
+            let path_for_preview = path_to_select.clone();
+            spawn_local(async move {
+                let encoded_path = urlencoding::encode(&path_for_preview);
+                let url = format!("/api/directories/children/{}", encoded_path);
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                if !data.directories.is_empty() {
+                                    set_preview_path.set(Some(path_for_preview.clone()));
+                                } else {
+                                    set_preview_path.set(None);
+                                }
+                            }
+                            Err(_) => {
+                                set_preview_path.set(None);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        set_preview_path.set(None);
+                    }
+                }
+            });
+            
+            // 加载兄弟节点到 OverviewB（父级节点的子节点）
+            let parent_for_b = grandparent_path.clone();
+            let path_to_select_clone = path_to_select.clone();
+            spawn_local(async move {
+                let url = if let Some(p) = parent_for_b {
+                    let encoded_path = urlencoding::encode(&p);
+                    format!("/api/directories/children/{}", encoded_path)
+                } else {
+                    "/api/directories/root".to_string()
+                };
+                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
+                
+                match Request::get(&url).send().await {
+                    Ok(resp) => {
+                        match resp.json::<DirectoriesResponse>().await {
+                            Ok(data) => {
+                                let dir_paths: Vec<String> = data.directories.iter()
+                                    .map(|d| d.path.clone())
+                                    .collect();
+                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
+                                
+                                // 先定位到之前选中的节点（父级节点），再设置 directories
+                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
+                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                                    Some(index)
+                                } else {
+                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                                    Some(0)
+                                };
+                                
+                                // 先设置索引，避免 effect 重置
+                                if let Some(idx) = target_index {
+                                    set_selected_index.set(Some(idx));
+                                    set_selected_path.set(Some(path_to_select_clone.clone()));
+                                }
+                                
+                                // 然后设置 directories 和 overview_b_directories
+                                set_overview_b_directories.set(dir_paths);
+                                set_directories.set(data.directories.clone());
+                            }
+                            Err(e) => {
+                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    }
+                }
+            });
+            
+            // 加载上一级节点到 OverviewA
+            if let Some(ref gp) = grandparent_path {
+                let parent_for_a = if gp.contains('.') {
+                    let parts: Vec<&str> = gp.split('.').collect();
+                    if parts.len() > 1 {
+                        Some(parts[0..parts.len()-1].join("."))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                spawn_local(async move {
+                    let url = if let Some(p) = parent_for_a {
+                        let encoded_path = urlencoding::encode(&p);
+                        format!("/api/directories/children/{}", encoded_path)
+                    } else {
+                        "/api/directories/root".to_string()
+                    };
+                    
+                    match Request::get(&url).send().await {
+                        Ok(resp) => {
+                            match resp.json::<DirectoriesResponse>().await {
+                                Ok(data) => {
+                                    let dir_paths: Vec<String> = data.directories.iter()
+                                        .map(|d| d.path.clone())
+                                        .collect();
+                                    set_overview_a_directories.set(dir_paths);
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+                set_overview_a_directories.set(Vec::new());
+            }
+        }
+    } else {
+        // 如果 OverviewA 为空，导航到根节点
+        console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
+        spawn_local(async move {
+            match Request::get("/api/directories/root").send().await {
+                Ok(resp) => {
+                    match resp.json::<DirectoriesResponse>().await {
+                        Ok(data) => {
+                            let dir_paths: Vec<String> = data.directories.iter()
+                                .map(|d| d.path.clone())
+                                .collect();
+                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
+                            set_overview_b_directories.set(dir_paths);
+                            
+                            if let Some(first_dir) = data.directories.first() {
+                                set_preview_path.set(Some(first_dir.path.clone()));
+                            }
+                            
+                            set_overview_a_directories.set(Vec::new());
+                            set_overview_a_selected_path.set(None);
+                            set_selected_path.set(None);
+                            set_selected_index.set(Some(0));
+                        }
+                        Err(e) => {
+                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                }
+            }
+        });
+    }
+}
+
+```
+
+
+检查编译错误，并修复闭包捕获问题：
+
+
+
+修复 `on_mount` 的导入问题：
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 在 window 上添加全局键盘事件监听器
+    // 这样无论焦点在哪里，都能捕获键盘事件
+    leptos::on_mount(move || {
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 检查当前焦点是否在输入框、文本区域等元素上
+            // 如果是，则不处理 hjkl 键，让用户正常输入
+            if let Some(active_element) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag_name = active_element.tag_name();
+                let node_name = active_element.node_name();
+                
+                // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+                let is_contenteditable = active_element.has_attribute("contenteditable");
+                
+                if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                    || is_contenteditable
+                    || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                    return;
+                }
+            }
+
+            // 将 web_sys::KeyboardEvent 转换为 leptos::ev::KeyboardEvent
+            // 创建一个包装器来处理事件
+            let key = event.key();
+            let shift_pressed = event.shift_key();
+            
+            // 只处理 hjkl 键（带或不带 Shift）
+            let should_handle = match key.as_str() {
+                "j" | "J" | "k" | "K" | "l" | "L" | "h" | "H" => true,
+                _ => false,
+            };
+            
+            if !should_handle {
+                return;
+            }
+            
+            // 阻止默认行为和事件冒泡
+            event.prevent_default();
+            event.stop_propagation();
+            
+            // 处理键盘导航
+            keyboard_handlers::handle_keyboard_navigation(
+                &event, // 传递原始事件，keyboard_handlers 会处理
+                directories.get(),
+                selected_index.get(),
+                overview_a_directories.get(),
+                overview_a_selected_path.get(),
+                set_selected_index,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_overview_b_directories,
+                set_preview_path,
+                set_directories,
+                preview_scroll_ref,
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        // 在 window 上添加事件监听器
+        if let Some(window) = web_sys::window() {
+            window
+                .add_event_listener_with_callback(
+                    "keydown",
+                    handle_global_keydown.as_ref().unchecked_ref(),
+                )
+                .expect("无法添加键盘事件监听器");
+
+            // 保存闭包的引用，防止被释放
+            handle_global_keydown.forget();
+        }
+    });
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+检查正确的 `on_mount` 用法：
+
+
+
+改用 `create_effect` 替代 `on_mount`：
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use leptos::ev::KeyboardEvent;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 在 window 上添加全局键盘事件监听器
+    // 这样无论焦点在哪里，都能捕获键盘事件
+    create_effect(move |_| {
+        // 只在组件挂载时执行一次
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 检查当前焦点是否在输入框、文本区域等元素上
+            // 如果是，则不处理 hjkl 键，让用户正常输入
+            if let Some(active_element) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag_name = active_element.tag_name();
+                let node_name = active_element.node_name();
+                
+                // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+                let is_contenteditable = active_element.has_attribute("contenteditable");
+                
+                if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                    || is_contenteditable
+                    || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                    return;
+                }
+            }
+
+            // 将 web_sys::KeyboardEvent 转换为 leptos::ev::KeyboardEvent
+            // 创建一个包装器来处理事件
+            let key = event.key();
+            let shift_pressed = event.shift_key();
+            
+            // 只处理 hjkl 键（带或不带 Shift）
+            let should_handle = match key.as_str() {
+                "j" | "J" | "k" | "K" | "l" | "L" | "h" | "H" => true,
+                _ => false,
+            };
+            
+            if !should_handle {
+                return;
+            }
+            
+            // 阻止默认行为和事件冒泡
+            event.prevent_default();
+            event.stop_propagation();
+            
+            // 处理键盘导航
+            keyboard_handlers::handle_keyboard_navigation(
+                &event, // 传递原始事件，keyboard_handlers 会处理
+                directories.get(),
+                selected_index.get(),
+                overview_a_directories.get(),
+                overview_a_selected_path.get(),
+                set_selected_index,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_overview_b_directories,
+                set_preview_path,
+                set_directories,
+                preview_scroll_ref,
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        // 在 window 上添加事件监听器
+        if let Some(window) = web_sys::window() {
+            let _ = window
+                .add_event_listener_with_callback(
+                    "keydown",
+                    handle_global_keydown.as_ref().unchecked_ref(),
+                );
+
+            // 保存闭包的引用，防止被释放
+            handle_global_keydown.forget();
+        }
+    });
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+编译通过。`create_effect` 会在依赖变化时重复执行，可能导致重复添加监听器。改为只添加一次：
+
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 在 window 上添加全局键盘事件监听器
+    // 这样无论焦点在哪里，都能捕获键盘事件
+    create_effect(move |_| {
+        // 只在组件挂载时执行一次
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 检查当前焦点是否在输入框、文本区域等元素上
+            // 如果是，则不处理 hjkl 键，让用户正常输入
+            if let Some(active_element) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag_name = active_element.tag_name();
+                let node_name = active_element.node_name();
+                
+                // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+                let is_contenteditable = active_element.has_attribute("contenteditable");
+                
+                if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                    || is_contenteditable
+                    || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                    return;
+                }
+            }
+
+            // 将 web_sys::KeyboardEvent 转换为 leptos::ev::KeyboardEvent
+            // 创建一个包装器来处理事件
+            let key = event.key();
+            let shift_pressed = event.shift_key();
+            
+            // 只处理 hjkl 键（带或不带 Shift）
+            let should_handle = match key.as_str() {
+                "j" | "J" | "k" | "K" | "l" | "L" | "h" | "H" => true,
+                _ => false,
+            };
+            
+            if !should_handle {
+                return;
+            }
+            
+            // 阻止默认行为和事件冒泡
+            event.prevent_default();
+            event.stop_propagation();
+            
+            // 处理键盘导航
+            keyboard_handlers::handle_keyboard_navigation(
+                &event, // 传递原始事件，keyboard_handlers 会处理
+                directories.get(),
+                selected_index.get(),
+                overview_a_directories.get(),
+                overview_a_selected_path.get(),
+                set_selected_index,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_overview_b_directories,
+                set_preview_path,
+                set_directories,
+                preview_scroll_ref,
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        // 在 window 上添加事件监听器
+        if let Some(window) = web_sys::window() {
+            let _ = window
+                .add_event_listener_with_callback(
+                    "keydown",
+                    handle_global_keydown.as_ref().unchecked_ref(),
+                );
+
+            // 保存闭包的引用，防止被释放
+            handle_global_keydown.forget();
+        }
+    });
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+```rust
+use crate::components::overview_a::OverviewA;
+use crate::components::overview_b::OverviewB;
+use crate::components::preview::Preview;
+use crate::components::title::Title;
+use crate::components::keyboard_handlers;
+use crate::components::mouse_handlers::DirectoryNode;
+use leptos::prelude::*;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+#[component]
+pub fn Home() -> impl IntoView {
+    // OverviewA 显示的目录列表（父级节点）
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    // OverviewA 中高亮的路径（当前节点的父级）
+    let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
+    // Preview 显示的路径（当前选中节点的子节点）
+    let (preview_path, set_preview_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的路径（用于高亮显示）
+    let (selected_path, set_selected_path) = signal::<Option<String>>(None);
+    // OverviewB 中当前选中的索引（用于键盘导航）
+    let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
+    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+
+    // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
+    let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // 在 window 上添加全局键盘事件监听器
+    // 这样无论焦点在哪里，都能捕获键盘事件
+    // 使用 Rc<RefCell<bool>> 来确保只添加一次监听器
+    let listener_added = Rc::new(RefCell::new(false));
+    let listener_added_clone = listener_added.clone();
+    
+    create_effect(move |_| {
+        // 只在组件挂载时执行一次
+        if *listener_added_clone.borrow() {
+            return;
+        }
+        *listener_added_clone.borrow_mut() = true;
+        
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 检查当前焦点是否在输入框、文本区域等元素上
+            // 如果是，则不处理 hjkl 键，让用户正常输入
+            if let Some(active_element) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag_name = active_element.tag_name();
+                let node_name = active_element.node_name();
+                
+                // 如果焦点在输入框、文本区域、可编辑元素上，不处理 hjkl 键
+                let is_contenteditable = active_element.has_attribute("contenteditable");
+                
+                if matches!(tag_name.as_str(), "INPUT" | "TEXTAREA") 
+                    || is_contenteditable
+                    || matches!(node_name.as_str(), "INPUT" | "TEXTAREA") {
+                    return;
+                }
+            }
+
+            // 将 web_sys::KeyboardEvent 转换为 leptos::ev::KeyboardEvent
+            // 创建一个包装器来处理事件
+            let key = event.key();
+            let shift_pressed = event.shift_key();
+            
+            // 只处理 hjkl 键（带或不带 Shift）
+            let should_handle = match key.as_str() {
+                "j" | "J" | "k" | "K" | "l" | "L" | "h" | "H" => true,
+                _ => false,
+            };
+            
+            if !should_handle {
+                return;
+            }
+            
+            // 阻止默认行为和事件冒泡
+            event.prevent_default();
+            event.stop_propagation();
+            
+            // 处理键盘导航
+            keyboard_handlers::handle_keyboard_navigation(
+                &event, // 传递原始事件，keyboard_handlers 会处理
+                directories.get(),
+                selected_index.get(),
+                overview_a_directories.get(),
+                overview_a_selected_path.get(),
+                set_selected_index,
+                set_selected_path,
+                set_overview_a_selected_path,
+                set_overview_a_directories,
+                set_overview_b_directories,
+                set_preview_path,
+                set_directories,
+                preview_scroll_ref,
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        // 在 window 上添加事件监听器
+        if let Some(window) = web_sys::window() {
+            let _ = window
+                .add_event_listener_with_callback(
+                    "keydown",
+                    handle_global_keydown.as_ref().unchecked_ref(),
+                );
+
+            // 保存闭包的引用，防止被释放
+            handle_global_keydown.forget();
+        }
+    });
+
+    view! {
+        <div 
+            class="flex flex-col h-screen"
+        >
+            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+                <Title/>
+            </div>
+            <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0">
+                <div class="col-span-2 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewA
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_selected_path=set_selected_path
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        set_preview_path=set_preview_path
+                    />
+                </div>
+                <div class="col-span-3 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <OverviewB
+                        overview_b_directories=overview_b_directories
+                        set_overview_b_directories=set_overview_b_directories
+                        set_overview_a_directories=set_overview_a_directories
+                        selected_path=selected_path
+                        set_selected_path=set_selected_path
+                        set_preview_path=set_preview_path
+                        selected_index=selected_index
+                        set_selected_index=set_selected_index
+                        overview_a_directories=overview_a_directories
+                        overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
+                        directories=directories
+                        set_directories=set_directories
+                        preview_scroll_ref=preview_scroll_ref
+                    />
+                </div>
+                <div class="col-span-5 h-full min-h-0 overflow-y-auto px-4 pt-0">
+                    <Preview
+                        preview_path=preview_path
+                        scroll_container_ref=preview_scroll_ref
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+```
+
+
+编译通过。已实现全局键盘事件监听器。总结修改：
+
+## 完成的修改
+
+### 1. **`home.rs`** - 在 window 上添加全局键盘事件监听器
+- 使用 `create_effect` 在 `window` 上添加全局 `keydown` 事件监听器
+- 使用 `Rc<RefCell<bool>>` 确保只添加一次监听器
+- 移除了根 `<div>` 上的 `on:keydown` 和 `tabindex`（不再需要）
+
+### 2. **`keyboard_handlers.rs`** - 修改函数签名
+- 将 `handle_keyboard_navigation` 的参数从 `KeyboardEvent`（leptos::ev）改为 `&web_sys::KeyboardEvent`
+- 移除了对 `leptos::ev::KeyboardEvent` 的依赖
+
+## 功能说明
+
+现在无论焦点在哪里（包括在 view 块中），hjkl 键盘操作都能正常工作，因为事件监听器直接绑定在 `window` 上。
+
+只有当焦点在以下元素上时，hjkl 键才会被忽略：
+- `INPUT` 元素
+- `TEXTAREA` 元素
+- 带有 `contenteditable` 属性的元素
+
+可以测试一下，应该可以在页面的任何位置使用 hjkl 键进行导航。
 
