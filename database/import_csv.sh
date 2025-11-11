@@ -32,7 +32,9 @@ for csv_file in /dataFolder/*.csv; do
                 has_visual_assets BOOLEAN NOT NULL,
                 has_text INTEGER NOT NULL,
                 has_images INTEGER NOT NULL,
-                has_subnodes BOOLEAN NOT NULL
+                has_subnodes BOOLEAN NOT NULL,
+                raw_path TEXT NOT NULL,
+                raw_filename TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_path_gist ON directory_nodes USING GIST (path);
             CREATE INDEX IF NOT EXISTS idx_path_btree ON directory_nodes USING BTREE (path);
@@ -44,7 +46,9 @@ EOF
         psql -U $POSTGRES_USER -d $POSTGRES_DB <<EOF
             CREATE EXTENSION IF NOT EXISTS ltree;
             CREATE TABLE IF NOT EXISTS file_nodes (
-                file_path ltree PRIMARY KEY
+                file_path ltree PRIMARY KEY,
+                raw_path TEXT NOT NULL,
+                raw_filename TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_file_path_gist ON file_nodes USING GIST (file_path);
             CREATE INDEX IF NOT EXISTS idx_file_path_btree ON file_nodes USING BTREE (file_path);

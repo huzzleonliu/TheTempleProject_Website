@@ -59,6 +59,9 @@ pub fn OverviewA(
                 children=move |path: String| {
                     let path_clone = path.clone();
                     let path_for_selected = path_clone.clone();
+                    // 注意：OverviewA 显示的是路径字符串，不是 DirectoryNode
+                    // 所以这里仍然从路径提取，但实际应该从数据库获取 raw_filename
+                    // 暂时保持原逻辑，因为 OverviewA 使用的是路径列表，不是完整的 DirectoryNode
                     let display_name = path.split('.').last().unwrap_or(&path).to_string();
                     // 判断当前节点是否被选中（用于高亮显示）
                     let is_selected = move || {

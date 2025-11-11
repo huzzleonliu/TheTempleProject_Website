@@ -62,7 +62,8 @@ pub fn Preview(
                                                 each=move || directories.get()
                                                 key=|dir| dir.path.clone()
                                                 children=move |dir: DirectoryNode| {
-                                                    let display_name = dir.path.split('.').last().unwrap_or(&dir.path).to_string();
+                                                    // 显示名称：使用 raw_filename（未清洗的目录名）
+                                                    let display_name = dir.raw_filename.clone();
                                                     view! {
                                                         <div class="text-2xl text-gray-500 hover:text-white hover:bg-gray-800">
                                                             {display_name}

@@ -16,13 +16,14 @@ pub struct DirectoryNode {
     pub has_text: i32,
     pub has_images: i32,
     pub has_subnodes: bool,
+    pub raw_filename: String,
 }
 
 /// 获取一级目录（路径深度为 1 的节点）
 pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
     let rows = sqlx::query(
         r#"
-        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
+        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes, raw_filename
         FROM directory_nodes
         WHERE nlevel(path) = 1
         ORDER BY path;
@@ -40,6 +41,7 @@ pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
             has_text: row.get::<i32, _>("has_text"),
             has_images: row.get::<i32, _>("has_images"),
             has_subnodes: row.get::<bool, _>("has_subnodes"),
+            raw_filename: row.get::<String, _>("raw_filename"),
         })
         .collect();
 
@@ -53,7 +55,7 @@ pub async fn get_child_directories(pool: &PgPool, parent_path: &str) -> Result<V
     
     let rows = sqlx::query(
         r#"
-        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
+        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes, raw_filename
         FROM directory_nodes
         WHERE path ~ $1::lquery
         ORDER BY path;
@@ -72,6 +74,7 @@ pub async fn get_child_directories(pool: &PgPool, parent_path: &str) -> Result<V
             has_text: row.get::<i32, _>("has_text"),
             has_images: row.get::<i32, _>("has_images"),
             has_subnodes: row.get::<bool, _>("has_subnodes"),
+            raw_filename: row.get::<String, _>("raw_filename"),
         })
         .collect();
 

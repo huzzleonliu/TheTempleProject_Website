@@ -9,6 +9,7 @@ pub struct DirectoryNode {
     pub has_text: i32,
     pub has_images: i32,
     pub has_subnodes: bool,
+    pub raw_filename: String,
 }
 
 /// API 响应数据结构

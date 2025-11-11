@@ -60,9 +60,9 @@ fn main() -> Result<()> {
 
     // 写入 CSV 表头（PostgreSQL 可直接导入）
     if is_visual {
-        writeln!(writer, "file_path").with_context(|| "写入 CSV 表头失败")?;
+        writeln!(writer, "file_path,raw_path,raw_filename").with_context(|| "写入 CSV 表头失败")?;
     } else {
-        writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
+        writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes,raw_path,raw_filename")
             .with_context(|| "写入 CSV 表头失败")?;
     }
 
@@ -170,7 +170,20 @@ fn main() -> Result<()> {
                                 if fpath.is_file() {
                                     if let Some(rel_file) = pathdiff::diff_paths(&fpath, &root) {
                                         if let Some(file_ltree) = path_to_ltree(&rel_file) {
-                                            writeln!(writer, "{}", file_ltree)
+                                            // 获取原始路径（相对于根目录，使用正斜杠）
+                                            let raw_path = rel_file.to_string_lossy().replace('\\', "/");
+                                            // 获取原始文件名
+                                            let raw_filename = fpath
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            
+                                            // 转义 CSV 字段（如果包含逗号、引号或换行符）
+                                            let raw_path_escaped = escape_csv_field(&raw_path);
+                                            let raw_filename_escaped = escape_csv_field(&raw_filename);
+                                            
+                                            writeln!(writer, "{},{},{}", file_ltree, raw_path_escaped, raw_filename_escaped)
                                                 .with_context(|| "写入 CSV 失败")?;
                                         }
                                     }
@@ -208,17 +221,32 @@ fn main() -> Result<()> {
         };
         let has_subnodes = check_has_subnodes(p);
 
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值/整数
+        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值/整数 + 原始路径 + 原始文件名
         if let Some(path_str) = path_to_ltree(&rel) {
+            // 获取原始路径（相对于根目录，使用正斜杠）
+            let raw_path = rel.to_string_lossy().replace('\\', "/");
+            // 获取原始目录名（用于显示节点名称）
+            let raw_filename = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            
+            // 转义 CSV 字段（如果包含逗号、引号或换行符）
+            let raw_path_escaped = escape_csv_field(&raw_path);
+            let raw_filename_escaped = escape_csv_field(&raw_filename);
+            
             writeln!(
                 writer,
-                "{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{}",
                 path_str,
                 has_layout,
                 has_visual_assets,
                 text_count,
                 image_count,
-                has_subnodes
+                has_subnodes,
+                raw_path_escaped,
+                raw_filename_escaped
             )
             .with_context(|| "写入 CSV 失败")?;
         }
@@ -287,6 +315,18 @@ fn sanitize_ltree_label(label: &str) -> String {
             }
         })
         .collect()
+}
+
+/// 转义 CSV 字段
+/// 如果字段包含逗号、引号或换行符，需要用双引号包裹，并转义内部的双引号
+fn escape_csv_field(field: &str) -> String {
+    // 如果字段包含逗号、引号或换行符，需要转义
+    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
+        // 用双引号包裹，并将内部的双引号转义为两个双引号
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
 }
 
 /// 检查目录内是否有 layout.md 文件

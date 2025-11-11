@@ -240,8 +240,8 @@ pub fn OverviewB(
                                             let path = dir.path.clone();
                                             let path_for_selected = path.clone();
                                             let has_subnodes = dir.has_subnodes;
-                                            // 显示名称：取路径的最后一部分（ltree 格式用点分隔）
-                                            let display_name = path.split('.').last().unwrap_or(&path).to_string();
+                                            // 显示名称：使用 raw_filename（未清洗的目录名）
+                                            let display_name = dir.raw_filename.clone();
                                             
                                             // 判断当前节点是否被选中（用于高亮显示）
                                             let is_selected = move || {
