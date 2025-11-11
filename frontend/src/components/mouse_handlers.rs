@@ -1,25 +1,10 @@
-use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::{Deserialize, Serialize};
 use web_sys::console;
+use crate::DirectoryNode;
+use crate::api::get_child_directories;
 
-/// 目录节点数据结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DirectoryNode {
-    pub path: String,
-    pub has_layout: bool,
-    pub has_visual_assets: bool,
-    pub has_text: i32,
-    pub has_images: i32,
-    pub has_subnodes: bool,
-}
-
-/// API 响应数据结构
-#[derive(Debug, Serialize, Deserialize)]
-struct DirectoriesResponse {
-    directories: Vec<DirectoryNode>,
-}
+// 类型已移动到 crate::types
 
 /// 处理鼠标点击节点时的导航逻辑
 /// 
@@ -75,42 +60,32 @@ pub fn handle_node_click(
         let path_clone = path.clone();
         let set_selected_index_clone = set_selected_index.clone();
         spawn_local(async move {
-            let encoded_path = urlencoding::encode(&path_clone);
-            let url = format!("/api/directories/children/{}", encoded_path);
-            console::log_2(&"[鼠标点击] 请求子节点:".into(), &url.clone().into());
-            
-            match Request::get(&url).send().await {
-                Ok(resp) => {
-                    match resp.json::<DirectoriesResponse>().await {
-                        Ok(data) => {
-                            let dir_paths: Vec<String> = data.directories.iter()
-                                .map(|d| d.path.clone())
-                                .collect();
-                            console::log_2(&"[鼠标点击] 加载子节点成功，数量:".into(), &data.directories.len().into());
-                            set_overview_b_directories.set(dir_paths);
-                            
-                            // 等待 overview_b.rs 的 effect 加载完新的 directories 后再设置 selected_index
-                            // 使用 request_animation_frame 延迟，确保 directories 已经更新
-                            use wasm_bindgen::prelude::*;
-                            use wasm_bindgen::JsCast;
-                            if let Some(window) = web_sys::window() {
-                                let closure = Closure::once_into_js(move || {
-                                    // 设置 selected_index 为 0，这会触发 overview_b.rs 的 effect 更新 Preview
-                                    set_selected_index_clone.set(Some(0));
-                                });
-                                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
-                            } else {
-                                // 如果无法使用 request_animation_frame，直接设置
-                                set_selected_index_clone.set(Some(0));
-                            }
-                        }
-                        Err(e) => {
-                            console::log_2(&"[鼠标点击] 解析响应失败:".into(), &format!("{:?}", e).into());
-                        }
+            console::log_2(&"[鼠标点击] 请求子节点:".into(), &path_clone.clone().into());
+            match get_child_directories(&path_clone).await {
+                Ok(children) => {
+                    let dir_paths: Vec<String> = children.iter()
+                        .map(|d| d.path.clone())
+                        .collect();
+                    console::log_2(&"[鼠标点击] 加载子节点成功，数量:".into(), &children.len().into());
+                    set_overview_b_directories.set(dir_paths);
+                    
+                    // 等待 overview_b.rs 的 effect 加载完新的 directories 后再设置 selected_index
+                    // 使用 request_animation_frame 延迟，确保 directories 已经更新
+                    use wasm_bindgen::prelude::*;
+                    use wasm_bindgen::JsCast;
+                    if let Some(window) = web_sys::window() {
+                        let closure = Closure::once_into_js(move || {
+                            // 设置 selected_index 为 0，这会触发 overview_b.rs 的 effect 更新 Preview
+                            set_selected_index_clone.set(Some(0));
+                        });
+                        let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                    } else {
+                        // 如果无法使用 request_animation_frame，直接设置
+                        set_selected_index_clone.set(Some(0));
                     }
                 }
                 Err(e) => {
-                    console::log_2(&"[鼠标点击] 请求失败:".into(), &format!("{:?}", e).into());
+                    console::log_2(&"[鼠标点击] 请求失败:".into(), &e.into());
                 }
             }
         });

@@ -3,7 +3,7 @@ use crate::components::overview_b::OverviewB;
 use crate::components::preview::Preview;
 use crate::components::title::Title;
 use crate::components::keyboard_handlers;
-use crate::components::mouse_handlers::DirectoryNode;
+use crate::DirectoryNode;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;

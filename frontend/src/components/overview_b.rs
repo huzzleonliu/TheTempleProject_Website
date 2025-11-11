@@ -1,16 +1,12 @@
-use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::{Deserialize, Serialize};
 use web_sys::console;
 
-use crate::components::mouse_handlers::DirectoryNode;
+use crate::DirectoryNode;
+use crate::api::{get_child_directories, get_root_directories};
 
 /// API 响应数据结构
-#[derive(Debug, Serialize, Deserialize)]
-struct DirectoriesResponse {
-    directories: Vec<DirectoryNode>,
-}
+// 类型由 crate::types 提供
 
 /// OverviewB 组件：显示当前层级的目录列表
 /// 
@@ -132,33 +128,25 @@ pub fn OverviewB(
                 set_loading.set(true);
                 set_error.set(None);
 
-                match Request::get("/api/directories/root").send().await {
-                    Ok(resp) => {
-                        match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.directories.len().into());
-                                set_directories.set(data.directories.clone());
-                                
-                                // 设置第一个有子节点的目录用于 Preview
-                                if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
-                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
-                                    set_preview_path.set(Some(first_dir.path.clone()));
-                                } else {
-                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
-                                    set_preview_path.set(None);
-                                }
-                                set_loading.set(false);
-                            }
-                            Err(e) => {
-                                console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
-                                set_error.set(Some(format!("解析错误: {e}")));
-                                set_loading.set(false);
-                            }
+                match get_root_directories().await {
+                    Ok(data) => {
+                        console::log_2(&"[OverviewB] 加载根目录成功，数量:".into(), &data.len().into());
+                        set_directories.set(data.clone());
+                        
+                        // 设置第一个有子节点的目录用于 Preview
+                        if let Some(first_dir) = data.iter().find(|d| d.has_subnodes) {
+                            console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                            set_preview_path.set(Some(first_dir.path.clone()));
+                        } else {
+                            console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                            set_preview_path.set(None);
                         }
+                        set_loading.set(false);
                     }
                     Err(e) => {
-                        console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
-                        set_error.set(Some(format!("请求失败: {e}")));
+                        let msg = format!("{e}");
+                        console::log_2(&"[OverviewB] 请求失败:".into(), &msg.clone().into());
+                        set_error.set(Some(format!("请求失败: {msg}")));
                         set_loading.set(false);
                     }
                 }
@@ -181,58 +169,47 @@ pub fn OverviewB(
                     set_loading.set(true);
                     set_error.set(None);
                     
-                    let url = if let Some(p) = parent_path {
-                        let encoded_path = urlencoding::encode(&p);
-                        format!("/api/directories/children/{}", encoded_path)
+                    let result = if let Some(p) = parent_path {
+                        get_child_directories(&p).await
                     } else {
-                        "/api/directories/root".to_string()
+                        get_root_directories().await
                     };
-                    console::log_2(&"[OverviewB] 请求 URL:".into(), &url.clone().into());
-                    
-                    match Request::get(&url).send().await {
-                        Ok(resp) => {
-                            match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.directories.len().into());
-                                set_directories.set(data.directories.clone());
-                                
-                                // 如果 selected_index 已设置，立即根据 selected_index 更新 Preview
-                                // 这样可以确保在进入新节点时，Preview 能第一时间刷新
-                                if let Some(index) = selected_index.get() {
-                                    if let Some(dir) = data.directories.get(index) {
-                                        if dir.has_subnodes {
-                                            console::log_2(&"[OverviewB] directories 加载完成，根据 selected_index 更新 Preview:".into(), &dir.path.clone().into());
-                                            set_preview_path.set(Some(dir.path.clone()));
-                                        } else {
-                                            console::log_2(&"[OverviewB] directories 加载完成，节点无子节点:".into(), &dir.path.clone().into());
-                                            set_preview_path.set(None);
-                                        }
+                    match result {
+                        Ok(data) => {
+                            console::log_2(&"[OverviewB] 加载目录信息成功，数量:".into(), &data.len().into());
+                            set_directories.set(data.clone());
+                            
+                            // 如果 selected_index 已设置，立即根据 selected_index 更新 Preview
+                            // 这样可以确保在进入新节点时，Preview 能第一时间刷新
+                            if let Some(index) = selected_index.get() {
+                                if let Some(dir) = data.get(index) {
+                                    if dir.has_subnodes {
+                                        console::log_2(&"[OverviewB] directories 加载完成，根据 selected_index 更新 Preview:".into(), &dir.path.clone().into());
+                                        set_preview_path.set(Some(dir.path.clone()));
                                     } else {
-                                        console::log_2(&"[OverviewB] selected_index 超出范围，重置 Preview".into(), &index.into());
+                                        console::log_2(&"[OverviewB] directories 加载完成，节点无子节点:".into(), &dir.path.clone().into());
                                         set_preview_path.set(None);
                                     }
                                 } else {
-                                    // 如果 selected_index 未设置，设置第一个有子节点的目录用于 Preview
-                                    if let Some(first_dir) = data.directories.iter().find(|d| d.has_subnodes) {
-                                        console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
-                                        set_preview_path.set(Some(first_dir.path.clone()));
-                                    } else {
-                                        console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
-                                        set_preview_path.set(None);
-                                    }
+                                    console::log_2(&"[OverviewB] selected_index 超出范围，重置 Preview".into(), &index.into());
+                                    set_preview_path.set(None);
                                 }
-                                set_loading.set(false);
-                            }
-                                Err(e) => {
-                                    console::log_2(&"[OverviewB] 解析响应失败:".into(), &format!("{:?}", e).into());
-                                    set_error.set(Some(format!("解析错误: {e}")));
-                                    set_loading.set(false);
+                            } else {
+                                // 如果 selected_index 未设置，设置第一个有子节点的目录用于 Preview
+                                if let Some(first_dir) = data.iter().find(|d| d.has_subnodes) {
+                                    console::log_2(&"[OverviewB] 设置 Preview 路径:".into(), &first_dir.path.clone().into());
+                                    set_preview_path.set(Some(first_dir.path.clone()));
+                                } else {
+                                    console::log_1(&"[OverviewB] 没有找到有子节点的目录".into());
+                                    set_preview_path.set(None);
                                 }
                             }
+                            set_loading.set(false);
                         }
                         Err(e) => {
-                            console::log_2(&"[OverviewB] 请求失败:".into(), &format!("{:?}", e).into());
-                            set_error.set(Some(format!("请求失败: {e}")));
+                            let msg = format!("{e}");
+                            console::log_2(&"[OverviewB] 请求失败:".into(), &msg.clone().into());
+                            set_error.set(Some(format!("请求失败: {msg}")));
                             set_loading.set(false);
                         }
                     }

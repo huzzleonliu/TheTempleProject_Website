@@ -1,18 +1,13 @@
-use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::{Deserialize, Serialize};
 use web_sys::console;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::components::mouse_handlers::DirectoryNode;
+use crate::DirectoryNode;
+use crate::api::{get_child_directories, get_root_directories};
 
-/// API 响应数据结构
-#[derive(Debug, Serialize, Deserialize)]
-struct DirectoriesResponse {
-    directories: Vec<DirectoryNode>,
-}
+// API 响应类型使用 crate::types
 
 /// 处理键盘导航事件（模仿 ranger 的导航方式）
 /// 
@@ -207,43 +202,33 @@ fn handle_enter_node(
             // 注意：Preview 路径会在 overview_b.rs 的 effect 中根据 selected_index 自动设置
             let path_clone = current_path.clone();
             spawn_local(async move {
-                let encoded_path = urlencoding::encode(&path_clone);
-                let url = format!("/api/directories/children/{}", encoded_path);
-                console::log_2(&"[进入节点] 请求子节点:".into(), &url.clone().into());
-                
-                match Request::get(&url).send().await {
-                    Ok(resp) => {
-                        match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                let dir_paths: Vec<String> = data.directories.iter()
-                                    .map(|d| d.path.clone())
-                                    .collect();
-                                console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &data.directories.len().into());
-                                
-                                // 先设置 overview_b_directories，这会触发 overview_b.rs 的 effect 加载新的 directories
-                                set_overview_b_directories.set(dir_paths);
-                                
-                                // 等待 directories 加载完成后再设置 selected_index
-                                // 使用 request_animation_frame 延迟，确保 overview_b.rs 的 effect 已经执行并更新了 directories
-                                let set_selected_index_clone = set_selected_index.clone();
-                                if let Some(window) = web_sys::window() {
-                                    let closure = Closure::once_into_js(move || {
-                                        // 设置 selected_index 为 0，这会触发 overview_b.rs 的 effect 更新 Preview
-                                        set_selected_index_clone.set(Some(0));
-                                    });
-                                    let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
-                                } else {
-                                    // 如果无法使用 request_animation_frame，直接设置
-                                    set_selected_index.set(Some(0));
-                                }
-                            }
-                            Err(e) => {
-                                console::log_2(&"[进入节点] 解析响应失败:".into(), &format!("{:?}", e).into());
-                            }
+                console::log_2(&"[进入节点] 请求子节点:".into(), &path_clone.clone().into());
+                match get_child_directories(&path_clone).await {
+                    Ok(children) => {
+                        let dir_paths: Vec<String> = children.iter()
+                            .map(|d| d.path.clone())
+                            .collect();
+                        console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &children.len().into());
+                        
+                        // 先设置 overview_b_directories，这会触发 overview_b.rs 的 effect 加载新的 directories
+                        set_overview_b_directories.set(dir_paths);
+                        
+                        // 等待 directories 加载完成后再设置 selected_index
+                        // 使用 request_animation_frame 延迟，确保 overview_b.rs 的 effect 已经执行并更新了 directories
+                        let set_selected_index_clone = set_selected_index.clone();
+                        if let Some(window) = web_sys::window() {
+                            let closure = Closure::once_into_js(move || {
+                                // 设置 selected_index 为 0，这会触发 overview_b.rs 的 effect 更新 Preview
+                                set_selected_index_clone.set(Some(0));
+                            });
+                            let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                        } else {
+                            // 如果无法使用 request_animation_frame，直接设置
+                            set_selected_index.set(Some(0));
                         }
                     }
                     Err(e) => {
-                        console::log_2(&"[进入节点] 请求失败:".into(), &format!("{:?}", e).into());
+                        console::log_2(&"[进入节点] 请求失败:".into(), &e.into());
                     }
                 }
             });
@@ -296,22 +281,12 @@ fn handle_go_back(
         // 设置 Preview 显示父级节点的子节点
         let path_for_preview = path_to_select.clone();
         spawn_local(async move {
-            let encoded_path = urlencoding::encode(&path_for_preview);
-            let url = format!("/api/directories/children/{}", encoded_path);
-            
-            match Request::get(&url).send().await {
-                Ok(resp) => {
-                    match resp.json::<DirectoriesResponse>().await {
-                        Ok(data) => {
-                            if !data.directories.is_empty() {
-                                set_preview_path.set(Some(path_for_preview.clone()));
-                            } else {
-                                set_preview_path.set(None);
-                            }
-                        }
-                        Err(_) => {
-                            set_preview_path.set(None);
-                        }
+            match get_child_directories(&path_for_preview).await {
+                Ok(children) => {
+                    if !children.is_empty() {
+                        set_preview_path.set(Some(path_for_preview.clone()));
+                    } else {
+                        set_preview_path.set(None);
                     }
                 }
                 Err(_) => {
@@ -324,50 +299,40 @@ fn handle_go_back(
         let parent_for_b = grandparent_path.clone();
         let path_to_select_clone = path_to_select.clone();
         spawn_local(async move {
-            let url = if let Some(p) = parent_for_b {
-                let encoded_path = urlencoding::encode(&p);
-                format!("/api/directories/children/{}", encoded_path)
+            let result = if let Some(p) = parent_for_b {
+                get_child_directories(&p).await
             } else {
-                "/api/directories/root".to_string()
+                get_root_directories().await
             };
-            console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
-            
-            match Request::get(&url).send().await {
-                Ok(resp) => {
-                    match resp.json::<DirectoriesResponse>().await {
-                        Ok(data) => {
-                            let dir_paths: Vec<String> = data.directories.iter()
-                                .map(|d| d.path.clone())
-                                .collect();
-                            console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
-                            
-                            // 先定位到之前选中的节点（父级节点），再设置 directories
-                            // 这样可以避免 overview_b.rs 中的 effect 重置索引
-                            let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
-                                console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
-                                Some(index)
-                            } else {
-                                console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
-                                Some(0)
-                            };
-                            
-                            // 先设置索引，避免 effect 重置
-                            if let Some(idx) = target_index {
-                                set_selected_index.set(Some(idx));
-                                set_selected_path.set(Some(path_to_select_clone.clone()));
-                            }
-                            
-                            // 然后设置 directories 和 overview_b_directories
-                            set_overview_b_directories.set(dir_paths);
-                            set_directories.set(data.directories.clone());
-                        }
-                        Err(e) => {
-                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
-                        }
+            match result {
+                Ok(data) => {
+                    let dir_paths: Vec<String> = data.iter()
+                        .map(|d| d.path.clone())
+                        .collect();
+                    console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.len().into());
+                    
+                    // 先定位到之前选中的节点（父级节点），再设置 directories
+                    // 这样可以避免 overview_b.rs 中的 effect 重置索引
+                    let target_index = if let Some(index) = data.iter().position(|d| d.path == path_to_select_clone) {
+                        console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                        Some(index)
+                    } else {
+                        console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                        Some(0)
+                    };
+                    
+                    // 先设置索引，避免 effect 重置
+                    if let Some(idx) = target_index {
+                        set_selected_index.set(Some(idx));
+                        set_selected_path.set(Some(path_to_select_clone.clone()));
                     }
+                    
+                    // 然后设置 directories 和 overview_b_directories
+                    set_overview_b_directories.set(dir_paths);
+                    set_directories.set(data.clone());
                 }
                 Err(e) => {
-                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    console::log_2(&"[返回父级] 请求失败:".into(), &e.into());
                 }
             }
         });
@@ -386,26 +351,16 @@ fn handle_go_back(
             };
             
             spawn_local(async move {
-                let url = if let Some(p) = parent_for_a {
-                    let encoded_path = urlencoding::encode(&p);
-                    format!("/api/directories/children/{}", encoded_path)
+                let result = if let Some(p) = parent_for_a {
+                    get_child_directories(&p).await
                 } else {
-                    "/api/directories/root".to_string()
+                    get_root_directories().await
                 };
-                
-                match Request::get(&url).send().await {
-                    Ok(resp) => {
-                        match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                let dir_paths: Vec<String> = data.directories.iter()
-                                    .map(|d| d.path.clone())
-                                    .collect();
-                                set_overview_a_directories.set(dir_paths);
-                            }
-                            Err(_) => {}
-                        }
-                    }
-                    Err(_) => {}
+                if let Ok(data) = result {
+                    let dir_paths: Vec<String> = data.iter()
+                        .map(|d| d.path.clone())
+                        .collect();
+                    set_overview_a_directories.set(dir_paths);
                 }
             });
         } else {
@@ -442,22 +397,12 @@ fn handle_go_back(
             // 设置 Preview 显示父级节点的子节点
             let path_for_preview = path_to_select.clone();
             spawn_local(async move {
-                let encoded_path = urlencoding::encode(&path_for_preview);
-                let url = format!("/api/directories/children/{}", encoded_path);
-                
-                match Request::get(&url).send().await {
-                    Ok(resp) => {
-                        match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                if !data.directories.is_empty() {
-                                    set_preview_path.set(Some(path_for_preview.clone()));
-                                } else {
-                                    set_preview_path.set(None);
-                                }
-                            }
-                            Err(_) => {
-                                set_preview_path.set(None);
-                            }
+                match get_child_directories(&path_for_preview).await {
+                    Ok(children) => {
+                        if !children.is_empty() {
+                            set_preview_path.set(Some(path_for_preview.clone()));
+                        } else {
+                            set_preview_path.set(None);
                         }
                     }
                     Err(_) => {
@@ -470,49 +415,39 @@ fn handle_go_back(
             let parent_for_b = grandparent_path.clone();
             let path_to_select_clone = path_to_select.clone();
             spawn_local(async move {
-                let url = if let Some(p) = parent_for_b {
-                    let encoded_path = urlencoding::encode(&p);
-                    format!("/api/directories/children/{}", encoded_path)
+                let result = if let Some(p) = parent_for_b {
+                    get_child_directories(&p).await
                 } else {
-                    "/api/directories/root".to_string()
+                    get_root_directories().await
                 };
-                console::log_2(&"[返回父级] 请求兄弟节点:".into(), &url.clone().into());
-                
-                match Request::get(&url).send().await {
-                    Ok(resp) => {
-                        match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                let dir_paths: Vec<String> = data.directories.iter()
-                                    .map(|d| d.path.clone())
-                                    .collect();
-                                console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.directories.len().into());
-                                
-                                // 先定位到之前选中的节点（父级节点），再设置 directories
-                                let target_index = if let Some(index) = data.directories.iter().position(|d| d.path == path_to_select_clone) {
-                                    console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
-                                    Some(index)
-                                } else {
-                                    console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
-                                    Some(0)
-                                };
-                                
-                                // 先设置索引，避免 effect 重置
-                                if let Some(idx) = target_index {
-                                    set_selected_index.set(Some(idx));
-                                    set_selected_path.set(Some(path_to_select_clone.clone()));
-                                }
-                                
-                                // 然后设置 directories 和 overview_b_directories
-                                set_overview_b_directories.set(dir_paths);
-                                set_directories.set(data.directories.clone());
-                            }
-                            Err(e) => {
-                                console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
-                            }
+                match result {
+                    Ok(data) => {
+                        let dir_paths: Vec<String> = data.iter()
+                            .map(|d| d.path.clone())
+                            .collect();
+                        console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.len().into());
+                        
+                        // 先定位到之前选中的节点（父级节点），再设置 directories
+                        let target_index = if let Some(index) = data.iter().position(|d| d.path == path_to_select_clone) {
+                            console::log_2(&"[返回父级] 定位到索引:".into(), &index.into());
+                            Some(index)
+                        } else {
+                            console::log_1(&"[返回父级] 未找到目标节点，定位到索引 0".into());
+                            Some(0)
+                        };
+                        
+                        // 先设置索引，避免 effect 重置
+                        if let Some(idx) = target_index {
+                            set_selected_index.set(Some(idx));
+                            set_selected_path.set(Some(path_to_select_clone.clone()));
                         }
+                        
+                        // 然后设置 directories 和 overview_b_directories
+                        set_overview_b_directories.set(dir_paths);
+                        set_directories.set(data.clone());
                     }
                     Err(e) => {
-                        console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                        console::log_2(&"[返回父级] 请求失败:".into(), &e.into());
                     }
                 }
             });
@@ -530,29 +465,19 @@ fn handle_go_back(
                     None
                 };
                 
-                spawn_local(async move {
-                    let url = if let Some(p) = parent_for_a {
-                        let encoded_path = urlencoding::encode(&p);
-                        format!("/api/directories/children/{}", encoded_path)
-                    } else {
-                        "/api/directories/root".to_string()
-                    };
-                    
-                    match Request::get(&url).send().await {
-                        Ok(resp) => {
-                            match resp.json::<DirectoriesResponse>().await {
-                                Ok(data) => {
-                                    let dir_paths: Vec<String> = data.directories.iter()
-                                        .map(|d| d.path.clone())
-                                        .collect();
-                                    set_overview_a_directories.set(dir_paths);
-                                }
-                                Err(_) => {}
-                            }
-                        }
-                        Err(_) => {}
-                    }
-                });
+            spawn_local(async move {
+                let result = if let Some(p) = parent_for_a {
+                    get_child_directories(&p).await
+                } else {
+                    get_root_directories().await
+                };
+                if let Ok(data) = result {
+                    let dir_paths: Vec<String> = data.iter()
+                        .map(|d| d.path.clone())
+                        .collect();
+                    set_overview_a_directories.set(dir_paths);
+                }
+            });
             } else {
                 // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
                 set_overview_a_directories.set(Vec::new());
@@ -562,32 +487,25 @@ fn handle_go_back(
         // 如果 OverviewA 为空，导航到根节点
         console::log_1(&"[返回父级] OverviewA 为空，导航到根节点".into());
         spawn_local(async move {
-            match Request::get("/api/directories/root").send().await {
-                Ok(resp) => {
-                    match resp.json::<DirectoriesResponse>().await {
-                        Ok(data) => {
-                            let dir_paths: Vec<String> = data.directories.iter()
-                                .map(|d| d.path.clone())
-                                .collect();
-                            console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.directories.len().into());
-                            set_overview_b_directories.set(dir_paths);
-                            
-                            if let Some(first_dir) = data.directories.first() {
-                                set_preview_path.set(Some(first_dir.path.clone()));
-                            }
-                            
-                            set_overview_a_directories.set(Vec::new());
-                            set_overview_a_selected_path.set(None);
-                            set_selected_path.set(None);
-                            set_selected_index.set(Some(0));
-                        }
-                        Err(e) => {
-                            console::log_2(&"[返回父级] 解析响应失败:".into(), &format!("{:?}", e).into());
-                        }
+            match get_root_directories().await {
+                Ok(data) => {
+                    let dir_paths: Vec<String> = data.iter()
+                        .map(|d| d.path.clone())
+                        .collect();
+                    console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.len().into());
+                    set_overview_b_directories.set(dir_paths);
+                    
+                    if let Some(first_dir) = data.first() {
+                        set_preview_path.set(Some(first_dir.path.clone()));
                     }
+                    
+                    set_overview_a_directories.set(Vec::new());
+                    set_overview_a_selected_path.set(None);
+                    set_selected_path.set(None);
+                    set_selected_index.set(Some(0));
                 }
                 Err(e) => {
-                    console::log_2(&"[返回父级] 请求失败:".into(), &format!("{:?}", e).into());
+                    console::log_2(&"[返回父级] 请求失败:".into(), &e.into());
                 }
             }
         });

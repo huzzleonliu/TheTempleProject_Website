@@ -1,22 +1,9 @@
-use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::{Deserialize, Serialize};
+use crate::DirectoryNode;
+use crate::api::get_child_directories;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DirectoryNode {
-    path: String,
-    has_layout: bool,
-    has_visual_assets: bool,
-    has_text: i32,
-    has_images: i32,
-    has_subnodes: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct DirectoriesResponse {
-    directories: Vec<DirectoryNode>,
-}
+// 类型已移动到 crate::types
 
 #[component]
 pub fn Preview(
@@ -35,25 +22,13 @@ pub fn Preview(
                 set_loading.set(true);
                 set_error.set(None);
 
-                // URL 编码路径
-                let encoded_path = urlencoding::encode(&path_clone);
-                let url = format!("/api/directories/children/{}", encoded_path);
-
-                match Request::get(&url).send().await {
-                    Ok(resp) => {
-                        match resp.json::<DirectoriesResponse>().await {
-                            Ok(data) => {
-                                set_directories.set(data.directories);
-                                set_loading.set(false);
-                            }
-                            Err(e) => {
-                                set_error.set(Some(format!("解析错误: {e}")));
-                                set_loading.set(false);
-                            }
-                        }
+                match get_child_directories(&path_clone).await {
+                    Ok(children) => {
+                        set_directories.set(children);
+                        set_loading.set(false);
                     }
                     Err(e) => {
-                        set_error.set(Some(format!("请求失败: {e}")));
+                        set_error.set(Some(e));
                         set_loading.set(false);
                     }
                 }
