@@ -10,18 +10,26 @@ use ignore::WalkBuilder;
 
 /// 命令行参数
 #[derive(Parser, Debug)]
-#[command(name = "node-generate-tool", version, about = "生成目录路径 CSV（支持 fileignore，gitignore 语法）")] 
+#[command(name = "node-generate-tool", version, about = "生成目录/资源 CSV（支持 fileignore，gitignore 语法）")] 
 struct Args {
     /// 根目录（将从该目录递归遍历子目录）
     root: PathBuf,
 
-    /// 输出 CSV 文件路径（默认: 当前目录下 directories.csv）
+    /// 输出 CSV 文件路径（--node 模式默认: node.csv；--visual-scan 模式默认: visual_assets.csv）
     #[arg(short = 'o', long = "output")]
     output: Option<PathBuf>,
 
     /// 指定 ignore 文件名（默认: fileignore，使用 gitignore 语法）
     #[arg(long = "ignore-file", default_value = "fileignore")]
     ignore_file: String,
+
+    /// 启用节点扫描模式（扫描目录，输出节点属性）
+    #[arg(long = "node")]
+    node: bool,
+
+    /// 启用 visual 资源扫描：输出 visual_assets 目录下的文件（不含子目录），以 ltree 形式记录文件路径
+    #[arg(long = "visual-scan")]
+    visual_scan: bool,
 }
 
 fn main() -> Result<()> {
@@ -33,9 +41,17 @@ fn main() -> Result<()> {
         bail!("提供的路径不是目录: {}", root.display());
     }
 
-    let output_path = args
-        .output
-        .unwrap_or_else(|| PathBuf::from("directories.csv"));
+    // 模式优先级：若提供 --visual-scan 则为 visual 模式；否则若提供 --node 则为 node 模式；二者都未提供时，默认 node 模式
+    let is_visual = args.visual_scan;
+    let is_node = !is_visual && (args.node || !args.node); // 默认 node 模式
+
+    let output_path = match (&args.output, is_visual, is_node) {
+        (Some(p), _, _) => p.clone(),
+        (None, true, _) => PathBuf::from("visual_assets.csv"),
+        (None, _, true) => PathBuf::from("node.csv"),
+        // 理论不可达，兜底
+        (None, _, _) => PathBuf::from("node.csv"),
+    };
 
     let mut writer = BufWriter::new(
         File::create(&output_path)
@@ -43,8 +59,12 @@ fn main() -> Result<()> {
     );
 
     // 写入 CSV 表头（PostgreSQL 可直接导入）
-    writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
-        .with_context(|| "写入 CSV 表头失败")?;
+    if is_visual {
+        writeln!(writer, "file_path").with_context(|| "写入 CSV 表头失败")?;
+    } else {
+        writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes")
+            .with_context(|| "写入 CSV 表头失败")?;
+    }
 
     // 使用 ignore 的 WalkBuilder，按如下顺序合并忽略文件（gitignore 语法）：
     // 1) 程序源码目录（编译期确定）
@@ -100,6 +120,15 @@ fn main() -> Result<()> {
         eprintln!("共加载 {} 个 ignore 文件", loaded_count);
     }
 
+    // 在 visual 扫描模式下，强制包含 visual_assets 目录，覆盖 fileignore 中的忽略规则
+    // 通过添加后置的“取消忽略”规则来实现（gitignore 语义：后规则优先）
+    if is_visual {
+        merged_rules.push_str("\n# visual-scan mode: force include visual_assets\n");
+        merged_rules.push_str("!visual_assets/\n");
+        merged_rules.push_str("!**/visual_assets/\n");
+        merged_rules.push_str("!**/visual_assets/**\n");
+    }
+
     // 如果有合并的规则，创建临时文件在扫描根目录，然后使用 add_custom_ignore_filename
     let temp_ignore_path = if !merged_rules.is_empty() {
         let temp_path = root.join(format!(".{}_merged", args.ignore_file));
@@ -125,11 +154,40 @@ fn main() -> Result<()> {
             }
         };
 
-        // 仅输出目录
-        let Some(ft) = dent.file_type() else { continue }; 
-        if !ft.is_dir() { continue; }
+        let Some(ft) = dent.file_type() else { continue };
 
         let p = dent.path();
+
+        if is_visual {
+            // visual 扫描模式：当遇到 visual_assets 目录时，列出其中的文件（不递归子目录）
+            if ft.is_dir() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name == "visual_assets" {
+                        // 遍历 visual_assets 下的直接文件
+                        if let Ok(entries) = read_dir(p) {
+                            for entry in entries.flatten() {
+                                let fpath = entry.path();
+                                if fpath.is_file() {
+                                    if let Some(rel_file) = pathdiff::diff_paths(&fpath, &root) {
+                                        if let Some(file_ltree) = path_to_ltree(&rel_file) {
+                                            writeln!(writer, "{}", file_ltree)
+                                                .with_context(|| "写入 CSV 失败")?;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // visual 模式仅关心文件，继续下一个条目
+                        continue;
+                    }
+                }
+            }
+            // 其他目录/文件在 visual 模式中忽略
+            continue;
+        }
+
+        // 目录扫描模式（默认） - 仅输出目录
+        if !ft.is_dir() { continue; }
 
         // 跳过根目录自身
         if same_path(p, &root) { continue; }
