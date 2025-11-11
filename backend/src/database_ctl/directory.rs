@@ -23,7 +23,7 @@ pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
     let rows = sqlx::query(
         r#"
         SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
-        FROM directories
+        FROM directory_nodes
         WHERE nlevel(path) = 1
         ORDER BY path;
         "#,
@@ -54,7 +54,7 @@ pub async fn get_child_directories(pool: &PgPool, parent_path: &str) -> Result<V
     let rows = sqlx::query(
         r#"
         SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes
-        FROM directories
+        FROM directory_nodes
         WHERE path ~ $1::lquery
         ORDER BY path;
         "#,

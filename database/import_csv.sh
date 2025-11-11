@@ -21,12 +21,12 @@ for csv_file in /dataFolder/*.csv; do
     
     echo "处理文件: $filename -> 表名: $table_name"
     
-    # 特殊处理：如果是 directories.csv，使用 ltree 类型
-    if [ "$table_name" = "directories" ]; then
-        # 创建表（如果不存在）
+    # 特殊处理：使用 ltree 类型的文件
+    if [ "$table_name" = "node" ]; then
+        # node.csv -> directory_nodes 表（使用 ltree 类型的 path 列）
         psql -U $POSTGRES_USER -d $POSTGRES_DB <<EOF
             CREATE EXTENSION IF NOT EXISTS ltree;
-            CREATE TABLE IF NOT EXISTS directories (
+            CREATE TABLE IF NOT EXISTS directory_nodes (
                 path ltree PRIMARY KEY,
                 has_layout BOOLEAN NOT NULL,
                 has_visual_assets BOOLEAN NOT NULL,
@@ -34,8 +34,23 @@ for csv_file in /dataFolder/*.csv; do
                 has_images INTEGER NOT NULL,
                 has_subnodes BOOLEAN NOT NULL
             );
-            TRUNCATE TABLE directories;
+            CREATE INDEX IF NOT EXISTS idx_path_gist ON directory_nodes USING GIST (path);
+            CREATE INDEX IF NOT EXISTS idx_path_btree ON directory_nodes USING BTREE (path);
+            TRUNCATE TABLE directory_nodes;
 EOF
+        table_name="directory_nodes"
+    elif [ "$table_name" = "visual_assets" ]; then
+        # visual_assets.csv -> file_nodes 表（使用 ltree 类型的 file_path 列）
+        psql -U $POSTGRES_USER -d $POSTGRES_DB <<EOF
+            CREATE EXTENSION IF NOT EXISTS ltree;
+            CREATE TABLE IF NOT EXISTS file_nodes (
+                file_path ltree PRIMARY KEY
+            );
+            CREATE INDEX IF NOT EXISTS idx_file_path_gist ON file_nodes USING GIST (file_path);
+            CREATE INDEX IF NOT EXISTS idx_file_path_btree ON file_nodes USING BTREE (file_path);
+            TRUNCATE TABLE file_nodes;
+EOF
+        table_name="file_nodes"
     else
         # 对于其他 CSV 文件，读取第一行创建表
         header=$(head -n 1 "$csv_file")

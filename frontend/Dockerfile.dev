@@ -2,13 +2,12 @@
 # Build stage
 FROM rust:latest 
 
-# Install Node.js and npm
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-
-RUN . ~/.bashrc && nvm install 24
+# 安装 Node.js 和 npm（使用 Debian 包管理器）
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+    apt-get install -y nodejs
 
 # Install Trunk
-RUN cargo install trunk
+RUN cargo install trunk --locked
 
 # Set working directory
 WORKDIR /app

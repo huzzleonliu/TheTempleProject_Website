@@ -18,8 +18,8 @@ port = 80                # The port to serve on.
 
 [[hooks]]
 stage = "pre_build"
-command = "node"
-command_arguments = ["node_modules/.bin/tailwindcss", "-i", "./style/input.css", "-o", "./style/output.css"]
+command = "npx"
+command_arguments = ["@tailwindcss/cli", "-i", "./style/input.css", "-o", "./style/output.css"]
 
 
 [tools]
