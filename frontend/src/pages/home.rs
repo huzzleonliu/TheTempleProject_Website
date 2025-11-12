@@ -125,6 +125,7 @@ pub fn Home() -> impl IntoView {
                     <OverviewA
                         overview_a_directories=overview_a_directories
                         overview_a_selected_path=overview_a_selected_path
+                        set_overview_a_selected_path=set_overview_a_selected_path
                         set_selected_path=set_selected_path
                         set_overview_b_directories=set_overview_b_directories
                         set_overview_a_directories=set_overview_a_directories

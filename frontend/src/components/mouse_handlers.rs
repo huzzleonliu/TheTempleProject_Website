@@ -1,8 +1,10 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use web_sys::console;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use crate::DirectoryNode;
-use crate::api::get_child_directories;
+use crate::api::{get_child_directories, get_root_directories};
 
 // 类型已移动到 crate::types
 
@@ -93,6 +95,178 @@ pub fn handle_node_click(
         // 如果没有子节点，不设置 Preview，也不跳转
         console::log_1(&"[鼠标点击] 节点没有子节点，不跳转".into());
         set_preview_path.set(None);
+    }
+}
+
+/// 处理 OverviewA 中点击父级节点时的导航逻辑
+/// 
+/// # 参数
+/// - `path`: 被点击的父级节点路径
+/// - `set_selected_path`: 设置选中路径的函数
+/// - `set_overview_b_directories`: 设置 OverviewB 目录列表的函数
+/// - `set_overview_a_directories`: 设置 OverviewA 目录列表的函数
+/// - `set_preview_path`: 设置 Preview 显示路径的函数
+/// - `set_selected_index`: 设置选中索引的函数
+pub fn handle_overview_a_click(
+    path: String,
+    set_selected_path: WriteSignal<Option<String>>,
+    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_preview_path: WriteSignal<Option<String>>,
+    set_selected_index: WriteSignal<Option<usize>>,
+) {
+    console::log_2(&"[OverviewA 点击] 路径:".into(), &path.clone().into());
+    
+    // 获取父路径（上一级）
+    let parent_path = if path.contains('.') {
+        let parts: Vec<&str> = path.split('.').collect();
+        if parts.len() > 1 {
+            Some(parts[0..parts.len()-1].join("."))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    
+    // 设置选中的路径
+    set_selected_path.set(Some(path.clone()));
+    
+    // 先获取被点击节点的信息，检查是否有子节点
+    let path_for_info = path.clone();
+    spawn_local(async move {
+        match get_child_directories(&path_for_info).await {
+            Ok(children) => {
+                if !children.is_empty() {
+                    set_preview_path.set(Some(path_for_info.clone()));
+                } else {
+                    set_preview_path.set(None);
+                }
+            }
+            Err(_) => {
+                set_preview_path.set(None);
+            }
+        }
+    });
+    
+    // 加载兄弟节点到 OverviewB
+    let parent_for_b = parent_path.clone();
+    let clicked_path = path.clone();
+    let set_selected_index_clone = set_selected_index.clone();
+    let set_preview_path_clone = set_preview_path.clone();
+    spawn_local(async move {
+        let result = if let Some(p) = parent_for_b {
+            get_child_directories(&p).await
+        } else {
+            get_root_directories().await
+        };
+        
+        if let Ok(data_dirs) = result {
+            let dir_paths: Vec<String> = data_dirs.iter()
+                .map(|d| d.path.clone())
+                .collect();
+            // 先设置 overview_b_directories，这会触发 overview_b.rs 的 effect 加载新的 directories
+            set_overview_b_directories.set(dir_paths.clone());
+            
+            // 找到被点击的节点在兄弟节点列表中的索引
+            if let Some(index) = data_dirs.iter().position(|d| d.path == clicked_path) {
+                console::log_2(&"[OverviewA] 找到被点击节点在兄弟节点列表中的索引:".into(), &index.into());
+                
+                // 等待 overview_b.rs 的 effect 加载完新的 directories 后再设置 selected_index
+                // 使用双重 request_animation_frame 延迟，确保 directories 已经更新
+                let set_selected_index_delayed = set_selected_index_clone.clone();
+                let set_preview_path_delayed = set_preview_path_clone.clone();
+                let clicked_dir = data_dirs.get(index).cloned();
+                
+                if let Some(window) = web_sys::window() {
+                    // 第一次延迟：等待 overview_b_directories 的 effect 触发
+                    let closure1 = Closure::once_into_js(move || {
+                        // 第二次延迟：等待 directories 加载完成
+                        if let Some(window2) = web_sys::window() {
+                            let closure2 = Closure::once_into_js(move || {
+                                // 设置 selected_index，这会触发 overview_b.rs 的 effect 更新 Preview
+                                set_selected_index_delayed.set(Some(index));
+                                
+                                // 同时立即设置 Preview，确保第一时间显示
+                                if let Some(dir) = clicked_dir {
+                                    if dir.has_subnodes {
+                                        console::log_2(&"[OverviewA] 立即设置 Preview 路径:".into(), &dir.path.clone().into());
+                                        set_preview_path_delayed.set(Some(dir.path.clone()));
+                                    } else {
+                                        set_preview_path_delayed.set(None);
+                                    }
+                                }
+                            });
+                            let _ = window2.request_animation_frame(closure2.as_ref().unchecked_ref());
+                        } else {
+                            // 如果无法使用 request_animation_frame，直接设置
+                            set_selected_index_delayed.set(Some(index));
+                            if let Some(dir) = clicked_dir.as_ref() {
+                                if dir.has_subnodes {
+                                    set_preview_path_delayed.set(Some(dir.path.clone()));
+                                } else {
+                                    set_preview_path_delayed.set(None);
+                                }
+                            }
+                        }
+                    });
+                    let _ = window.request_animation_frame(closure1.as_ref().unchecked_ref());
+                } else {
+                    // 如果无法使用 request_animation_frame，直接设置
+                    set_selected_index_clone.set(Some(index));
+                    if let Some(dir) = data_dirs.get(index) {
+                        if dir.has_subnodes {
+                            set_preview_path_clone.set(Some(dir.path.clone()));
+                        } else {
+                            set_preview_path_clone.set(None);
+                        }
+                    }
+                }
+            } else {
+                console::log_1(&"[OverviewA] 未找到被点击节点在兄弟节点列表中".into());
+                // 如果找不到，设置第一个有子节点的目录
+                if let Some(first_dir) = data_dirs.iter().find(|d| d.has_subnodes) {
+                    set_selected_index_clone.set(Some(0));
+                    set_preview_path_clone.set(Some(first_dir.path.clone()));
+                } else {
+                    set_selected_index_clone.set(Some(0));
+                    set_preview_path_clone.set(None);
+                }
+            }
+        } else {
+            // ignore errors here
+        }
+    });
+    
+    // 加载上一级节点到 OverviewA
+    if let Some(pp) = parent_path {
+        let parent_for_a = if pp.contains('.') {
+            let parts: Vec<&str> = pp.split('.').collect();
+            if parts.len() > 1 {
+                Some(parts[0..parts.len()-1].join("."))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        spawn_local(async move {
+            let result = if let Some(p) = parent_for_a {
+                get_child_directories(&p).await
+            } else {
+                get_root_directories().await
+            };
+            if let Ok(data_dirs) = result {
+                let dir_paths: Vec<String> = data_dirs.iter()
+                    .map(|d| d.path.clone())
+                    .collect();
+                set_overview_a_directories.set(dir_paths);
+            }
+        });
+    } else {
+        // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+        set_overview_a_directories.set(Vec::new());
     }
 }
 

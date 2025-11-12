@@ -4,4 +4,7 @@ mod components;
 mod types;
 mod api;
 
-pub use types::{DirectoryNode, DirectoriesResponse};
+pub use types::{
+    DirectoryNode, DirectoriesResponse, Item, ItemType, 
+    ItemContext, NavigationSignals, DataSignals
+};

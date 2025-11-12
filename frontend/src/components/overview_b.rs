@@ -2,8 +2,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use web_sys::console;
 
-use crate::DirectoryNode;
+use crate::{DirectoryNode, ItemContext, NavigationSignals, DataSignals};
 use crate::api::{get_child_directories, get_root_directories};
+use crate::components::item::ItemComponent;
 
 /// API 响应数据结构
 // 类型由 crate::types 提供
@@ -236,55 +237,50 @@ pub fn OverviewB(
                                         each=move || directories.get()
                                         key=|dir| dir.path.clone()
                                         children=move |dir: DirectoryNode| {
-                                            // 提取目录信息
-                                            let path = dir.path.clone();
-                                            let path_for_selected = path.clone();
-                                            let has_subnodes = dir.has_subnodes;
-                                            // 显示名称：使用 raw_filename（未清洗的目录名）
-                                            let display_name = dir.raw_filename.clone();
+                                            let path_clone = dir.path.clone();
                                             
-                                            // 判断当前节点是否被选中（用于高亮显示）
-                                            let is_selected = move || {
+                                            // 创建导航信号
+                                            let nav = NavigationSignals {
+                                                set_overview_a_directories,
+                                                set_overview_a_selected_path,
+                                                set_overview_b_directories,
+                                                set_preview_path,
+                                                set_selected_path,
+                                                set_selected_index,
+                                            };
+                                            
+                                            // 创建数据信号
+                                            let data = DataSignals {
+                                                directories,
+                                            };
+                                            
+                                            // 创建 ItemContext
+                                            let context = ItemContext::from_node(
+                                                dir,
+                                                nav,
+                                                data,
+                                                false, // OverviewB 中不是 OverviewA
+                                            );
+                                            
+                                            // 使用 Memo 计算是否选中（避免闭包类型问题）
+                                            let is_selected = Memo::new(move |_| {
                                                 if let Some(index) = selected_index.get() {
                                                     let dirs = directories.get();
-                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_for_selected) {
+                                                    if let Some(dir_idx) = dirs.iter().position(|d| d.path == path_clone) {
                                                         index == dir_idx
                                                     } else {
                                                         false
                                                     }
                                                 } else {
-                                                    selected_path.get().as_ref() == Some(&path_for_selected)
+                                                    selected_path.get().as_ref() == Some(&path_clone)
                                                 }
-                                            };
+                                            });
                                             
                                             view! {
-                                                <li class="w-full min-w-0">
-                                                    <button
-                                                        class=move || {
-                                                            if is_selected() {
-                                                                "w-full h-full text-left text-white bg-gray-800 truncate"
-                                                            } else {
-                                                                "w-full h-full text-left hover:text-white hover:bg-gray-800 focus-within:bg-gray-600 focus-within:text-white active:bg-gray-400 truncate"
-                                                            }
-                                                        }
-                                                        on:click=move |_| {
-                                                            // 鼠标点击处理 - 委托给 mouse_handlers 模块
-                                                            crate::components::mouse_handlers::handle_node_click(
-                                                                path.clone(),
-                                                                has_subnodes,
-                                                                directories.get(),
-                                                                set_overview_a_directories,
-                                                                set_overview_a_selected_path,
-                                                                set_overview_b_directories,
-                                                                set_preview_path,
-                                                                set_selected_path,
-                                                                set_selected_index,
-                                                            );
-                                                        }
-                                                    >
-                                                        {display_name}
-                                                    </button>
-                                                </li>
+                                                <ItemComponent
+                                                    context=context
+                                                    is_selected=is_selected
+                                                />
                                             }
                                         }
                                     />

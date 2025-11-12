@@ -272,6 +272,9 @@
   .min-h-0 {
     min-height: calc(var(--spacing) * 0);
   }
+  .\!w-full {
+    width: 100% !important;
+  }
   .w-full {
     width: 100%;
   }
