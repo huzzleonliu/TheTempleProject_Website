@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryNode {
     pub path: String,
-    pub has_layout: bool,
-    pub has_visual_assets: bool,
-    pub has_text: i32,
-    pub has_images: i32,
     pub has_subnodes: bool,
     pub raw_filename: String,
 }

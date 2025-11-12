@@ -62,7 +62,7 @@ fn main() -> Result<()> {
     if is_visual {
         writeln!(writer, "file_path,raw_path,raw_filename").with_context(|| "写入 CSV 表头失败")?;
     } else {
-        writeln!(writer, "path,has_layout,has_visual_assets,has_text,has_images,has_subnodes,raw_path,raw_filename")
+        writeln!(writer, "path,has_subnodes,raw_path,raw_filename")
             .with_context(|| "写入 CSV 表头失败")?;
     }
 
@@ -211,17 +211,10 @@ fn main() -> Result<()> {
             None => continue,
         };
 
-        // 检查目录节点的各种属性
-        let has_layout = check_has_layout(p);
-        let has_visual_assets = check_has_visual_assets(p);
-        let (text_count, image_count) = if has_visual_assets {
-            check_visual_assets_content(p)
-        } else {
-            (0, 0)
-        };
+        // 检查目录节点的属性
         let has_subnodes = check_has_subnodes(p);
 
-        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值/整数 + 原始路径 + 原始文件名
+        // 生成 CSV 行：路径（ltree 格式，点号分隔）+ 布尔值 + 原始路径 + 原始文件名
         if let Some(path_str) = path_to_ltree(&rel) {
             // 获取原始路径（相对于根目录，使用正斜杠）
             let raw_path = rel.to_string_lossy().replace('\\', "/");
@@ -238,12 +231,8 @@ fn main() -> Result<()> {
             
             writeln!(
                 writer,
-                "{},{},{},{},{},{},{},{}",
+                "{},{},{},{}",
                 path_str,
-                has_layout,
-                has_visual_assets,
-                text_count,
-                image_count,
                 has_subnodes,
                 raw_path_escaped,
                 raw_filename_escaped
@@ -327,55 +316,6 @@ fn escape_csv_field(field: &str) -> String {
     } else {
         field.to_string()
     }
-}
-
-/// 检查目录内是否有 layout.md 文件
-fn check_has_layout(dir: &Path) -> bool {
-    dir.join("layout.md").is_file()
-}
-
-/// 检查目录内是否有 visual_assets 目录
-fn check_has_visual_assets(dir: &Path) -> bool {
-    dir.join("visual_assets").is_dir()
-}
-
-/// 检查 visual_assets 目录下的内容
-/// 返回 (text_count, image_count)
-/// text_count: .md 文件的数量
-/// image_count: .png、.webp、.jpg 文件的总数
-fn check_visual_assets_content(dir: &Path) -> (u32, u32) {
-    let va_dir = dir.join("visual_assets");
-    if !va_dir.is_dir() {
-        return (0, 0);
-    }
-
-    let Ok(entries) = read_dir(&va_dir) else {
-        return (0, 0);
-    };
-
-    let mut text_count = 0u32;
-    let mut image_count = 0u32;
-
-    // 只统计 png、webp、jpg 图片文件
-    let image_exts: &[&str] = &["png", "webp", "jpg", "jpeg"];
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                // 统计 markdown 文件
-                if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
-                    text_count += 1;
-                }
-                // 统计图片文件（只统计 png、webp、jpg）
-                if image_exts.iter().any(|&e| ext.eq_ignore_ascii_case(e)) {
-                    image_count += 1;
-                }
-            }
-        }
-    }
-
-    (text_count, image_count)
 }
 
 /// 检查目录内是否有其他目录（排除 visual_assets 和 project_archive）

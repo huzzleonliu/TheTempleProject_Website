@@ -28,10 +28,6 @@ for csv_file in /dataFolder/*.csv; do
             CREATE EXTENSION IF NOT EXISTS ltree;
             CREATE TABLE IF NOT EXISTS directory_nodes (
                 path ltree PRIMARY KEY,
-                has_layout BOOLEAN NOT NULL,
-                has_visual_assets BOOLEAN NOT NULL,
-                has_text INTEGER NOT NULL,
-                has_images INTEGER NOT NULL,
                 has_subnodes BOOLEAN NOT NULL,
                 raw_path TEXT NOT NULL,
                 raw_filename TEXT NOT NULL

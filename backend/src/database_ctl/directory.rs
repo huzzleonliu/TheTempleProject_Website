@@ -11,10 +11,6 @@ use sqlx::Row;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DirectoryNode {
     pub path: String,
-    pub has_layout: bool,
-    pub has_visual_assets: bool,
-    pub has_text: i32,
-    pub has_images: i32,
     pub has_subnodes: bool,
     pub raw_filename: String,
 }
@@ -23,7 +19,7 @@ pub struct DirectoryNode {
 pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
     let rows = sqlx::query(
         r#"
-        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes, raw_filename
+        SELECT path::text as path, has_subnodes, raw_filename
         FROM directory_nodes
         WHERE nlevel(path) = 1
         ORDER BY path;
@@ -36,10 +32,6 @@ pub async fn get_root_directories(pool: &PgPool) -> Result<Vec<DirectoryNode>> {
         .iter()
         .map(|row| DirectoryNode {
             path: row.get::<String, _>("path"),
-            has_layout: row.get::<bool, _>("has_layout"),
-            has_visual_assets: row.get::<bool, _>("has_visual_assets"),
-            has_text: row.get::<i32, _>("has_text"),
-            has_images: row.get::<i32, _>("has_images"),
             has_subnodes: row.get::<bool, _>("has_subnodes"),
             raw_filename: row.get::<String, _>("raw_filename"),
         })
@@ -55,7 +47,7 @@ pub async fn get_child_directories(pool: &PgPool, parent_path: &str) -> Result<V
     
     let rows = sqlx::query(
         r#"
-        SELECT path::text as path, has_layout, has_visual_assets, has_text, has_images, has_subnodes, raw_filename
+        SELECT path::text as path, has_subnodes, raw_filename
         FROM directory_nodes
         WHERE path ~ $1::lquery
         ORDER BY path;
@@ -69,10 +61,6 @@ pub async fn get_child_directories(pool: &PgPool, parent_path: &str) -> Result<V
         .iter()
         .map(|row| DirectoryNode {
             path: row.get::<String, _>("path"),
-            has_layout: row.get::<bool, _>("has_layout"),
-            has_visual_assets: row.get::<bool, _>("has_visual_assets"),
-            has_text: row.get::<i32, _>("has_text"),
-            has_images: row.get::<i32, _>("has_images"),
             has_subnodes: row.get::<bool, _>("has_subnodes"),
             raw_filename: row.get::<String, _>("raw_filename"),
         })
