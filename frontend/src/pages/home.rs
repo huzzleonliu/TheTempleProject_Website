@@ -3,7 +3,7 @@ use crate::components::overview_b::OverviewB;
 use crate::components::preview::Preview;
 use crate::components::title::Title;
 use crate::components::keyboard_handlers;
-use crate::DirectoryNode;
+use crate::{DirectoryNode, Item};
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -12,23 +12,97 @@ use std::cell::RefCell;
 
 #[component]
 pub fn Home() -> impl IntoView {
+    // 统一数据源：都使用 DirectoryNode
     // OverviewA 显示的目录列表（父级节点）
-    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<String>>(Vec::new());
+    let (overview_a_directories, set_overview_a_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // OverviewB 显示的目录列表（当前节点）
+    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    // OverviewB 中的目录完整信息（用于键盘事件，与 overview_b_directories 同步）
+    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
+    
+    // 状态信号
     // OverviewA 中高亮的路径（当前节点的父级）
     let (overview_a_selected_path, set_overview_a_selected_path) = signal::<Option<String>>(None);
-    // OverviewB 显示的目录列表（当前节点）
-    let (overview_b_directories, set_overview_b_directories) = signal::<Vec<String>>(Vec::new());
     // Preview 显示的路径（当前选中节点的子节点）
     let (preview_path, set_preview_path) = signal::<Option<String>>(None);
     // OverviewB 中当前选中的路径（用于高亮显示）
     let (selected_path, set_selected_path) = signal::<Option<String>>(None);
     // OverviewB 中当前选中的索引（用于键盘导航）
     let (selected_index, set_selected_index) = signal::<Option<usize>>(None);
-    // OverviewB 中的目录完整信息（提升到全局，供键盘事件使用）
-    let (directories, set_directories) = signal::<Vec<DirectoryNode>>(Vec::new());
 
     // Preview 滚动容器的 NodeRef（用于从 OverviewB 控制滚动）
     let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+
+    // Item 列表信号
+    let (overview_a_items, set_overview_a_items) = signal::<Vec<Item>>(Vec::new());
+    let (overview_b_items, set_overview_b_items) = signal::<Vec<Item>>(Vec::new());
+
+    // 当 overview_a_directories 改变时，更新 overview_a_items
+    create_effect({
+        let set_overview_a_items = set_overview_a_items.clone();
+        let set_overview_b_items = set_overview_b_items.clone();
+        let set_overview_a_selected_path = set_overview_a_selected_path.clone();
+        let set_preview_path = set_preview_path.clone();
+        let set_selected_path = set_selected_path.clone();
+        let set_selected_index = set_selected_index.clone();
+        let overview_b_directories_read = overview_b_directories;
+        
+        move |_| {
+            let items: Vec<Item> = overview_a_directories.get()
+                .into_iter()
+                .map(|node| {
+                    Item::from_node(
+                        node,
+                        set_overview_a_items.clone(),
+                        set_overview_b_items.clone(),
+                        set_overview_a_selected_path.clone(),
+                        set_preview_path.clone(),
+                        set_selected_path.clone(),
+                        set_selected_index.clone(),
+                        overview_b_directories_read.clone(),
+                        true, // is_overview_a
+                    )
+                })
+                .collect();
+            set_overview_a_items.set(items);
+        }
+    });
+
+    // 当 overview_b_directories 改变时，更新 overview_b_items
+    create_effect({
+        let set_overview_a_items = set_overview_a_items.clone();
+        let set_overview_b_items = set_overview_b_items.clone();
+        let set_overview_a_selected_path = set_overview_a_selected_path.clone();
+        let set_preview_path = set_preview_path.clone();
+        let set_selected_path = set_selected_path.clone();
+        let set_selected_index = set_selected_index.clone();
+        let overview_b_directories_read = overview_b_directories;
+        
+        move |_| {
+            let items: Vec<Item> = overview_b_directories.get()
+                .into_iter()
+                .map(|node| {
+                    Item::from_node(
+                        node,
+                        set_overview_a_items.clone(),
+                        set_overview_b_items.clone(),
+                        set_overview_a_selected_path.clone(),
+                        set_preview_path.clone(),
+                        set_selected_path.clone(),
+                        set_selected_index.clone(),
+                        overview_b_directories_read.clone(),
+                        false, // is_overview_a
+                    )
+                })
+                .collect();
+            set_overview_b_items.set(items);
+        }
+    });
+
+    // 同步 directories：当 overview_b_directories 变化时，更新 directories（用于键盘事件）
+    create_effect(move |_| {
+        set_directories.set(overview_b_directories.get());
+    });
 
     // 在 window 上添加全局键盘事件监听器
     // 这样无论焦点在哪里，都能捕获键盘事件
@@ -87,7 +161,7 @@ pub fn Home() -> impl IntoView {
                 &event, // 传递原始事件，keyboard_handlers 会处理
                 directories.get(),
                 selected_index.get(),
-                overview_a_directories.get(),
+                overview_a_directories.get().as_slice(),
                 overview_a_selected_path.get(),
                 set_selected_index,
                 set_selected_path,
@@ -123,31 +197,20 @@ pub fn Home() -> impl IntoView {
             <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden items-start">
                 <div class="col-span-2 overflow-y-auto px-4 pt-0">
                     <OverviewA
-                        overview_a_directories=overview_a_directories
-                        overview_a_selected_path=overview_a_selected_path
-                        set_overview_a_selected_path=set_overview_a_selected_path
-                        set_selected_path=set_selected_path
+                        items=overview_a_items
+                        selected_path=overview_a_selected_path
                         set_overview_b_directories=set_overview_b_directories
                         set_overview_a_directories=set_overview_a_directories
                         set_preview_path=set_preview_path
-                        set_selected_index=set_selected_index
+                        set_selected_path=set_selected_path
+                        set_overview_b_items=set_overview_b_items
                     />
                 </div>
                 <div class="col-span-3 overflow-y-auto px-4 pt-0">
                     <OverviewB
-                        overview_b_directories=overview_b_directories
-                        set_overview_b_directories=set_overview_b_directories
-                        set_overview_a_directories=set_overview_a_directories
+                        items=overview_b_items
                         selected_path=selected_path
-                        set_selected_path=set_selected_path
-                        set_preview_path=set_preview_path
                         selected_index=selected_index
-                        set_selected_index=set_selected_index
-                        overview_a_directories=overview_a_directories
-                        overview_a_selected_path=overview_a_selected_path
-                        set_overview_a_selected_path=set_overview_a_selected_path
-                        directories=directories
-                        set_directories=set_directories
                         preview_scroll_ref=preview_scroll_ref
                     />
                 </div>

@@ -5,6 +5,5 @@ mod types;
 mod api;
 
 pub use types::{
-    DirectoryNode, DirectoriesResponse, Item, ItemType, 
-    ItemContext, NavigationSignals, DataSignals
+    DirectoryNode, DirectoriesResponse, Item, ItemType
 };

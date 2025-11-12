@@ -24,9 +24,9 @@ pub fn handle_node_click(
     path: String,
     has_subnodes: bool,
     directories: Vec<DirectoryNode>,
-    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<DirectoryNode>>,
     set_overview_a_selected_path: WriteSignal<Option<String>>,
-    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<DirectoryNode>>,
     set_preview_path: WriteSignal<Option<String>>,
     set_selected_path: WriteSignal<Option<String>>,
     set_selected_index: WriteSignal<Option<usize>>,
@@ -41,11 +41,7 @@ pub fn handle_node_click(
     if has_subnodes {
         console::log_1(&"[鼠标点击] 进入子节点".into());
         // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
-        let current_dirs: Vec<String> = directories
-            .iter()
-            .map(|d| d.path.clone())
-            .collect();
-        set_overview_a_directories.set(current_dirs);
+        set_overview_a_directories.set(directories.clone());
         
         // 高亮 OverviewA 中的当前节点（作为父级）
         set_overview_a_selected_path.set(Some(path.clone()));
@@ -65,11 +61,8 @@ pub fn handle_node_click(
             console::log_2(&"[鼠标点击] 请求子节点:".into(), &path_clone.clone().into());
             match get_child_directories(&path_clone).await {
                 Ok(children) => {
-                    let dir_paths: Vec<String> = children.iter()
-                        .map(|d| d.path.clone())
-                        .collect();
                     console::log_2(&"[鼠标点击] 加载子节点成功，数量:".into(), &children.len().into());
-                    set_overview_b_directories.set(dir_paths);
+                    set_overview_b_directories.set(children);
                     
                     // 等待 overview_b.rs 的 effect 加载完新的 directories 后再设置 selected_index
                     // 使用 request_animation_frame 延迟，确保 directories 已经更新
@@ -110,8 +103,8 @@ pub fn handle_node_click(
 pub fn handle_overview_a_click(
     path: String,
     set_selected_path: WriteSignal<Option<String>>,
-    set_overview_b_directories: WriteSignal<Vec<String>>,
-    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<DirectoryNode>>,
+    set_overview_a_directories: WriteSignal<Vec<DirectoryNode>>,
     set_preview_path: WriteSignal<Option<String>>,
     set_selected_index: WriteSignal<Option<usize>>,
 ) {
@@ -162,11 +155,8 @@ pub fn handle_overview_a_click(
         };
         
         if let Ok(data_dirs) = result {
-            let dir_paths: Vec<String> = data_dirs.iter()
-                .map(|d| d.path.clone())
-                .collect();
             // 先设置 overview_b_directories，这会触发 overview_b.rs 的 effect 加载新的 directories
-            set_overview_b_directories.set(dir_paths.clone());
+            set_overview_b_directories.set(data_dirs.clone());
             
             // 找到被点击的节点在兄弟节点列表中的索引
             if let Some(index) = data_dirs.iter().position(|d| d.path == clicked_path) {
@@ -258,10 +248,7 @@ pub fn handle_overview_a_click(
                 get_root_directories().await
             };
             if let Ok(data_dirs) = result {
-                let dir_paths: Vec<String> = data_dirs.iter()
-                    .map(|d| d.path.clone())
-                    .collect();
-                set_overview_a_directories.set(dir_paths);
+                set_overview_a_directories.set(data_dirs);
             }
         });
     } else {

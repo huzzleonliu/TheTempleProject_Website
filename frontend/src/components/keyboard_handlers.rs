@@ -37,13 +37,13 @@ pub fn handle_keyboard_navigation(
     event: &web_sys::KeyboardEvent,
     directories: Vec<DirectoryNode>,
     selected_index: Option<usize>,
-    overview_a_directories: Vec<String>,
+    overview_a_directories: &[DirectoryNode],
     overview_a_selected_path: Option<String>,
     set_selected_index: WriteSignal<Option<usize>>,
     set_selected_path: WriteSignal<Option<String>>,
     set_overview_a_selected_path: WriteSignal<Option<String>>,
-    set_overview_a_directories: WriteSignal<Vec<String>>,
-    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<DirectoryNode>>,
+    set_overview_b_directories: WriteSignal<Vec<DirectoryNode>>,
     set_preview_path: WriteSignal<Option<String>>,
     set_directories: WriteSignal<Vec<DirectoryNode>>,
     preview_scroll_ref: NodeRef<leptos::html::Div>,
@@ -174,9 +174,9 @@ fn handle_enter_node(
     directories: &[DirectoryNode],
     set_selected_path: WriteSignal<Option<String>>,
     set_overview_a_selected_path: WriteSignal<Option<String>>,
-    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_a_directories: WriteSignal<Vec<DirectoryNode>>,
     set_preview_path: WriteSignal<Option<String>>,
-    set_overview_b_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<DirectoryNode>>,
     set_selected_index: WriteSignal<Option<usize>>,
 ) {
     if let Some(dir) = directories.get(current_index) {
@@ -188,11 +188,8 @@ fn handle_enter_node(
             set_selected_path.set(Some(current_path.clone()));
             
             // 将当前 OverviewB 的内容移到 OverviewA（作为父级节点）
-            let current_dirs: Vec<String> = directories.iter()
-                .map(|d| d.path.clone())
-                .collect();
-            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &current_dirs.len().into());
-            set_overview_a_directories.set(current_dirs);
+            console::log_2(&"[进入节点] 移动到 OverviewA 的节点数:".into(), &directories.len().into());
+            set_overview_a_directories.set(directories.to_vec());
             
             // 高亮 OverviewA 中的当前节点（作为父级）
             set_overview_a_selected_path.set(Some(current_path.clone()));
@@ -205,13 +202,10 @@ fn handle_enter_node(
                 console::log_2(&"[进入节点] 请求子节点:".into(), &path_clone.clone().into());
                 match get_child_directories(&path_clone).await {
                     Ok(children) => {
-                        let dir_paths: Vec<String> = children.iter()
-                            .map(|d| d.path.clone())
-                            .collect();
                         console::log_2(&"[进入节点] 加载子节点成功，数量:".into(), &children.len().into());
                         
                         // 先设置 overview_b_directories，这会触发 overview_b.rs 的 effect 加载新的 directories
-                        set_overview_b_directories.set(dir_paths);
+                        set_overview_b_directories.set(children);
                         
                         // 等待 directories 加载完成后再设置 selected_index
                         // 使用 request_animation_frame 延迟，确保 overview_b.rs 的 effect 已经执行并更新了 directories
@@ -241,13 +235,13 @@ fn handle_enter_node(
 /// 处理返回父级节点（h 键）
 /// 后退到父级节点时，光标要在高亮的节点上
 fn handle_go_back(
-    overview_a_directories: &[String],
+    overview_a_directories: &[DirectoryNode],
     overview_a_selected_path: Option<String>,
     set_selected_path: WriteSignal<Option<String>>,
     set_overview_a_selected_path: WriteSignal<Option<String>>,
     set_preview_path: WriteSignal<Option<String>>,
-    set_overview_b_directories: WriteSignal<Vec<String>>,
-    set_overview_a_directories: WriteSignal<Vec<String>>,
+    set_overview_b_directories: WriteSignal<Vec<DirectoryNode>>,
+    set_overview_a_directories: WriteSignal<Vec<DirectoryNode>>,
     set_selected_index: WriteSignal<Option<usize>>,
     set_directories: WriteSignal<Vec<DirectoryNode>>,
 ) {
@@ -306,9 +300,6 @@ fn handle_go_back(
             };
             match result {
                 Ok(data) => {
-                    let dir_paths: Vec<String> = data.iter()
-                        .map(|d| d.path.clone())
-                        .collect();
                     console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.len().into());
                     
                     // 先定位到之前选中的节点（父级节点），再设置 directories
@@ -328,7 +319,7 @@ fn handle_go_back(
                     }
                     
                     // 然后设置 directories 和 overview_b_directories
-                    set_overview_b_directories.set(dir_paths);
+                    set_overview_b_directories.set(data.clone());
                     set_directories.set(data.clone());
                 }
                 Err(e) => {
@@ -357,10 +348,7 @@ fn handle_go_back(
                     get_root_directories().await
                 };
                 if let Ok(data) = result {
-                    let dir_paths: Vec<String> = data.iter()
-                        .map(|d| d.path.clone())
-                        .collect();
-                    set_overview_a_directories.set(dir_paths);
+                    set_overview_a_directories.set(data);
                 }
             });
         } else {
@@ -369,8 +357,8 @@ fn handle_go_back(
         }
     } else if !overview_a_directories.is_empty() {
         // 如果 overview_a_selected_path 为空，但 overview_a_directories 不为空，使用最后一个节点作为后备
-        if let Some(parent_path) = overview_a_directories.last() {
-            let path_to_select = parent_path.clone();
+        if let Some(parent_node) = overview_a_directories.last() {
+            let path_to_select = parent_node.path.clone();
             console::log_2(&"[返回父级] 目标路径（后备，来自 overview_a_directories.last）:".into(), &path_to_select.clone().into());
             
             // 获取父路径（上一级）
@@ -422,9 +410,6 @@ fn handle_go_back(
                 };
                 match result {
                     Ok(data) => {
-                        let dir_paths: Vec<String> = data.iter()
-                            .map(|d| d.path.clone())
-                            .collect();
                         console::log_2(&"[返回父级] 加载兄弟节点成功，数量:".into(), &data.len().into());
                         
                         // 先定位到之前选中的节点（父级节点），再设置 directories
@@ -443,7 +428,7 @@ fn handle_go_back(
                         }
                         
                         // 然后设置 directories 和 overview_b_directories
-                        set_overview_b_directories.set(dir_paths);
+                        set_overview_b_directories.set(data.clone());
                         set_directories.set(data.clone());
                     }
                     Err(e) => {
@@ -472,10 +457,7 @@ fn handle_go_back(
                     get_root_directories().await
                 };
                 if let Ok(data) = result {
-                    let dir_paths: Vec<String> = data.iter()
-                        .map(|d| d.path.clone())
-                        .collect();
-                    set_overview_a_directories.set(dir_paths);
+                    set_overview_a_directories.set(data);
                 }
             });
             } else {
@@ -489,11 +471,8 @@ fn handle_go_back(
         spawn_local(async move {
             match get_root_directories().await {
                 Ok(data) => {
-                    let dir_paths: Vec<String> = data.iter()
-                        .map(|d| d.path.clone())
-                        .collect();
                     console::log_2(&"[返回父级] 加载根节点成功，数量:".into(), &data.len().into());
-                    set_overview_b_directories.set(dir_paths);
+                    set_overview_b_directories.set(data.clone());
                     
                     if let Some(first_dir) = data.first() {
                         set_preview_path.set(Some(first_dir.path.clone()));
