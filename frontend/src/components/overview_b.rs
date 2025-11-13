@@ -1,101 +1,63 @@
+use leptos::ev::MouseEvent;
 use leptos::prelude::*;
-use web_sys::console;
+use leptos::callback::{Callable, UnsyncCallback};
 
-use crate::Item;
-use crate::components::item::ItemComponent;
+use crate::DirectoryNode;
 
-/// OverviewB 组件：显示当前层级的目录列表
-/// 
-/// # 功能
-/// - 显示当前层级的目录列表
-/// - 支持鼠标点击导航
-/// - 支持键盘导航（j/k/l/h 键）
-/// - 支持 Shift+J/K 滚动 Preview
-/// 
-/// # 参数
-/// - `items`: Item 列表（在 Home 中创建）
-/// - `selected_path`: 当前选中的路径（用于高亮显示）
-/// - `selected_index`: 当前选中的索引（用于键盘导航）
-/// - `preview_scroll_ref`: Preview 滚动容器的引用（用于 Shift+J/K 滚动）
 #[component]
 pub fn OverviewB(
-    items: ReadSignal<Vec<Item>>,
-    selected_path: ReadSignal<Option<String>>,
+    nodes: Memo<Vec<DirectoryNode>>,
     selected_index: ReadSignal<Option<usize>>,
-    preview_scroll_ref: NodeRef<leptos::html::Div>,
+    #[prop(into)]
+    on_select: UnsyncCallback<usize>,
+    #[prop(into)]
+    on_enter: UnsyncCallback<usize>,
 ) -> impl IntoView {
-    // 当 items 改变时，如果索引未设置或超出范围，则重置为 0
-    create_effect(move |_| {
-        let items_list = items.get();
-        if !items_list.is_empty() {
-            if let Some(current_idx) = selected_index.get() {
-                if current_idx >= items_list.len() {
-                    console::log_2(&"[OverviewB] 索引超出范围，重置为 0。当前索引:".into(), &current_idx.into());
-                    console::log_2(&"[OverviewB] 列表长度:".into(), &items_list.len().into());
-                    // 通过第一个 item 的信号来更新索引
-                    if let Some(first_item) = items_list.first() {
-                        first_item.set_selected_index.set(Some(0));
-                    }
-                }
-            } else {
-                console::log_1(&"[OverviewB] 索引未设置，重置为 0".into());
-                if let Some(first_item) = items_list.first() {
-                    first_item.set_selected_index.set(Some(0));
-                }
-            }
-        }
-    });
-
-    // 当选中索引改变时，更新 Preview 显示的内容
-    create_effect(move |_| {
-        let items_list = items.get();
-        if let Some(index) = selected_index.get() {
-            if index < items_list.len() {
-                let selected_item = &items_list[index];
-                console::log_2(&"[OverviewB] 选中索引改变，更新 Preview:".into(), &selected_item.path.clone().into());
-                
-                // 设置选中的路径（用于高亮显示）
-                selected_item.set_selected_path.set(Some(selected_item.path.clone()));
-                
-                // 只有当节点有子节点时才设置 Preview
-                if selected_item.has_subnodes {
-                    selected_item.set_preview_path.set(Some(selected_item.path.clone()));
-                } else {
-                    selected_item.set_preview_path.set(None);
-                }
-            }
-        }
-    });
-
     view! {
-        <ul 
-            class="text-2xl text-gray-500 outline-none"
-        >
+        <ul class="text-2xl text-gray-500 outline-none">
             <For
-                each=move || items.get()
-                key=|item| item.path.clone()
-                children=move |item: Item| {
-                    let path_clone = item.path.clone();
-                    
-                    // 使用 Memo 计算是否选中
-                    let is_selected = Memo::new(move |_| {
-                        if let Some(index) = selected_index.get() {
-                            let items_list = items.get();
-                            if let Some(item_idx) = items_list.iter().position(|it| it.path == path_clone) {
-                                index == item_idx
-                            } else {
-                                false
-                            }
-                        } else {
-                            selected_path.get().as_ref() == Some(&path_clone)
-                        }
+                each=move || nodes.get().into_iter().enumerate()
+                key=|(idx, node)| format!("{}:{}", idx, node.path)
+                children=move |(idx, node): (usize, DirectoryNode)| {
+                    let is_selected = Memo::new({
+                        let selected_index = selected_index.clone();
+                        move |_| selected_index.get() == Some(idx)
                     });
-                    
+                    let has_subnodes = node.has_subnodes;
+                    let path = node.path.clone();
+                    let label = node.raw_filename.clone();
+
                     view! {
-                        <ItemComponent
-                            item=item
-                            is_selected=is_selected
-                        />
+                        <li class="w-full min-w-0">
+                            <button
+                                class=move || {
+                                    let base = "w-full h-full text-left truncate text-2xl px-2 py-2 rounded";
+                                    if is_selected.get() {
+                                        format!("{base} text-white bg-gray-800")
+                                    } else {
+                                        format!("{base} text-gray-400 hover:text-white hover:bg-gray-800 focus-within:bg-gray-700")
+                                    }
+                                }
+                                on:click=move |_event: MouseEvent| {
+                                    on_select.run(idx);
+                                }
+                                on:dblclick=move |_event: MouseEvent| {
+                                    if has_subnodes {
+                                        on_enter.run(idx);
+                                    }
+                                }
+                            >
+                                {label}
+                                {move || {
+                                    if has_subnodes {
+                                        view! { <span class="ml-2 text-xs text-gray-500">"[+]"</span> }.into_view()
+                                    } else {
+                                        view! { <span class="ml-2 text-xs text-gray-500">""</span> }.into_view()
+                                    }
+                                }}
+                                <div class="text-xs text-gray-600 break-all">{path.clone()}</div>
+                            </button>
+                        </li>
                     }
                 }
             />

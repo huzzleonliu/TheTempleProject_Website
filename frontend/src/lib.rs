@@ -5,5 +5,5 @@ mod types;
 mod api;
 
 pub use types::{
-    DirectoryNode, DirectoriesResponse, Item, ItemType
+    DirectoryNode, DirectoriesResponse, NodesCache, ROOT_PATH,
 };

@@ -4,7 +4,7 @@ use web_sys::console;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use crate::DirectoryNode;
-use crate::api::{get_child_directories, get_root_directories};
+use crate::api::get_child_directories;
 
 // 类型已移动到 crate::types
 
@@ -151,7 +151,8 @@ pub fn handle_overview_a_click(
         let result = if let Some(p) = parent_for_b {
             get_child_directories(&p).await
         } else {
-            get_root_directories().await
+            // 如果父路径为空，加载 "1_OnceAndOnceAgain" 的子节点
+            get_child_directories("1_OnceAndOnceAgain").await
         };
         
         if let Ok(data_dirs) = result {
@@ -245,14 +246,15 @@ pub fn handle_overview_a_click(
             let result = if let Some(p) = parent_for_a {
                 get_child_directories(&p).await
             } else {
-                get_root_directories().await
+                // 如果父路径为空，加载 "1_OnceAndOnceAgain" 的子节点
+                get_child_directories("1_OnceAndOnceAgain").await
             };
             if let Ok(data_dirs) = result {
                 set_overview_a_directories.set(data_dirs);
             }
         });
     } else {
-        // 如果父路径是根，OverviewA 应该显示空列表（只有 "/"）
+        // 如果父路径为空，OverviewA 应该显示空列表
         set_overview_a_directories.set(Vec::new());
     }
 }
