@@ -15,12 +15,12 @@ use leptos::task::spawn_local;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+/// 页面入口：负责三栏布局、状态信号初始化，以及路径驱动的导航逻辑。
 #[component]
 pub fn Home() -> impl IntoView {
     let path_cache = RwSignal::new(HashMap::new());
     let current_path = RwSignal::new(None::<String>);
     let selected_index = RwSignal::new(None::<usize>);
-    let pending_selected_index = RwSignal::new(None::<usize>);
     let preview_path = RwSignal::new(None::<String>);
     let preview_nodes = RwSignal::new(Vec::<DirectoryNode>::new());
     let preview_loading = RwSignal::new(false);
@@ -28,8 +28,8 @@ pub fn Home() -> impl IntoView {
 
     let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
 
-    // 当前层级下的节点列表（用于 OverviewB）
-    let current_children = create_memo({
+    // 当前层级下的节点列表（OverviewB 的内容来源）
+    let current_children = Memo::new({
         let path_cache = path_cache.clone();
         let current_path = current_path.clone();
         move |_| {
@@ -41,8 +41,8 @@ pub fn Home() -> impl IntoView {
         }
     });
 
-    // OverviewA：展示当前节点上一级目录的节点列表
-    let overview_a_nodes = create_memo({
+    // OverviewA：展示当前节点父级目录下的所有节点（用于回退时的兄弟选择）
+    let overview_a_nodes = Memo::new({
         let path_cache = path_cache.clone();
         let current_path = current_path.clone();
         move |_| {
@@ -61,7 +61,7 @@ pub fn Home() -> impl IntoView {
         }
     });
 
-    let overview_a_highlight = create_memo({
+    let overview_a_highlight = Memo::new({
         let current_path = current_path.clone();
         move |_| Some(current_path.get().unwrap_or_else(|| ROOT_PATH.to_string()))
     });
@@ -71,13 +71,12 @@ pub fn Home() -> impl IntoView {
         let path_cache = path_cache.clone();
         let current_path = current_path.clone();
         let selected_index = selected_index.clone();
-        let pending_selected_index = pending_selected_index.clone();
         let preview_path = preview_path.clone();
-        move |target: Option<String>| {
+        // target: 目标层级路径；preferred_index: 希望在目标层级高亮的节点下标
+        move |target: Option<String>, preferred_index: Option<usize>| {
             let path_cache = path_cache.clone();
             let current_path = current_path.clone();
             let selected_index = selected_index.clone();
-            let pending_selected_index = pending_selected_index.clone();
             let preview_path = preview_path.clone();
             spawn_local(async move {
                 if let Err(e) = ensure_path_and_ancestors(target.as_ref(), path_cache.clone()).await {
@@ -95,20 +94,18 @@ pub fn Home() -> impl IntoView {
 
                 current_path.set(target.clone());
 
-                let preferred_index = pending_selected_index.get_untracked();
-                pending_selected_index.set(None);
-
                 if children.is_empty() {
                     selected_index.set(None);
                     preview_path.set(None);
-                } else {
-                    let idx = preferred_index.unwrap_or(0).min(children.len() - 1);
-                    selected_index.set(Some(idx));
-                    let preview = children
-                        .get(idx)
-                        .and_then(|node| if node.has_subnodes { Some(node.path.clone()) } else { None });
-                    preview_path.set(preview);
+                    return;
                 }
+
+                let idx = preferred_index.unwrap_or(0).min(children.len() - 1);
+                selected_index.set(Some(idx));
+                let preview = children
+                    .get(idx)
+                    .and_then(|node| node.has_subnodes.then(|| node.path.clone()));
+                preview_path.set(preview);
             });
         }
     });
@@ -155,7 +152,7 @@ pub fn Home() -> impl IntoView {
             if let Some(idx) = selected_index.get_untracked() {
                 if let Some(node) = current_children.get_untracked().get(idx) {
                     if node.has_subnodes {
-                        navigate_to(Some(node.path.clone()));
+                        navigate_to(Some(node.path.clone()), None);
                     }
                 }
             }
@@ -165,18 +162,36 @@ pub fn Home() -> impl IntoView {
     // 返回上一级
     let go_back = Rc::new({
         let current_path = current_path.clone();
+        let path_cache = path_cache.clone();
         let navigate_to = navigate_to.clone();
         move || {
             let current = current_path.get_untracked();
-            match current {
-                Some(ref path) if !path.is_empty() => {
-                    let parent = parent_path(path)
-                        .and_then(|p| if p.is_empty() { None } else { Some(p) });
-                    navigate_to(parent);
+            let path_cache = path_cache.clone();
+            let navigate_to = navigate_to.clone();
+            spawn_local(async move {
+                match current {
+                    Some(path) if !path.is_empty() => {
+                        let parent = parent_path(&path).unwrap_or_else(|| ROOT_PATH.to_string());
+                        if let Err(e) = ensure_children(&parent, path_cache.clone()).await {
+                            web_sys::console::log_2(&"[返回上级] 加载父级失败: ".into(), &e.into());
+                            return;
+                        }
+
+                        let siblings = path_cache
+                            .with(|map| map.get(&parent).cloned())
+                            .unwrap_or_default();
+                        let idx = siblings
+                            .iter()
+                            .position(|node| node.path == path)
+                            .unwrap_or(0);
+                        // 当返回到根目录时，使用 None 标识，让 OverviewB 显示根层级
+                        let target = if parent.is_empty() { None } else { Some(parent) };
+                        navigate_to(target, Some(idx));
+                    }
+                    Some(_) => navigate_to(None, None),
+                    None => {}
                 }
-                Some(_) => navigate_to(None),
-                None => {}
-            }
+            });
         }
     });
 
@@ -185,7 +200,7 @@ pub fn Home() -> impl IntoView {
         let current_children = current_children.clone();
         let selected_index_signal = selected_index.clone();
         let preview_path_signal = preview_path.clone();
-        create_effect(move |_| {
+        Effect::new(move |_| {
             let children = current_children.get();
             let len = children.len();
             let current_idx = selected_index_signal.get();
@@ -217,7 +232,7 @@ pub fn Home() -> impl IntoView {
         let preview_nodes = preview_nodes.clone();
         let preview_loading = preview_loading.clone();
         let preview_error = preview_error.clone();
-        create_effect(move |_| {
+        Effect::new(move |_| {
             if let Some(path) = preview_path_signal.get() {
                 preview_loading.set(true);
                 preview_error.set(None);
@@ -253,7 +268,7 @@ pub fn Home() -> impl IntoView {
         let current_path = current_path.clone();
         let selected_index = selected_index.clone();
         let preview_path = preview_path.clone();
-        create_effect(move |_| {
+        Effect::new(move |_| {
             if initialized.get() {
                 return;
             }
@@ -291,56 +306,35 @@ pub fn Home() -> impl IntoView {
         });
     }
 
-    // OverviewA 点击（切换到某个父级节点）
+    // OverviewA 点击（退回到对应层级，并让 OverviewB 高亮该节点）
     let overview_a_select_callback: UnsyncCallback<Option<String>> = {
         let navigate_to = navigate_to.clone();
         let path_cache = path_cache.clone();
-        let pending_selected_index = pending_selected_index.clone();
         UnsyncCallback::new(move |target: Option<String>| {
             let navigate_to = navigate_to.clone();
             let path_cache = path_cache.clone();
-            let pending_selected_index = pending_selected_index.clone();
 
             spawn_local(async move {
-                let (dest_parent, highlight_path) = match target {
-                    None => {
-                        pending_selected_index.set(None);
-                        (None, None)
-                    }
-                    Some(ref path) if path.is_empty() => {
-                        pending_selected_index.set(None);
-                        (None, None)
-                    }
+                match target {
+                    None => navigate_to(None, None),
+                    Some(path) if path.is_empty() => navigate_to(None, None),
                     Some(path) => {
                         let parent = parent_path(&path).unwrap_or_else(|| ROOT_PATH.to_string());
-                        (Some(parent), Some(path))
-                    }
-                };
-
-                if let Some(ref parent) = dest_parent {
-                    if let Err(e) = ensure_children(parent, path_cache.clone()).await {
-                        web_sys::console::log_2(&"[OverviewA] 加载失败: ".into(), &e.into());
-                        return;
-                    }
-
-                    if let Some(ref highlight_path) = highlight_path {
-                        let siblings = path_cache
-                            .with(|map| map.get(parent).cloned())
-                            .unwrap_or_default();
-
-                        if let Some(idx) = siblings
-                            .iter()
-                            .position(|node| node.path == *highlight_path)
-                        {
-                            pending_selected_index.set(Some(idx));
+                        if let Err(e) = ensure_children(&parent, path_cache.clone()).await {
+                            web_sys::console::log_2(&"[OverviewA] 加载父级失败: ".into(), &e.into());
+                            return;
                         }
+
+                        let siblings = path_cache
+                            .with(|map| map.get(&parent).cloned())
+                            .unwrap_or_default();
+                        let idx = siblings
+                            .iter()
+                            .position(|node| node.path == path)
+                            .unwrap_or(0);
+                        let target_layer = if parent.is_empty() { None } else { Some(parent) };
+                        navigate_to(target_layer, Some(idx));
                     }
-                }
-
-                navigate_to(dest_parent.clone());
-
-                if dest_parent.is_none() {
-                    // select_index(None.unwrap_or_default()); // Removed as per edit hint
                 }
             });
         })
@@ -359,7 +353,7 @@ pub fn Home() -> impl IntoView {
         UnsyncCallback::new(move |idx: usize| {
             if let Some(node) = current_children.get_untracked().get(idx) {
                 if node.has_subnodes {
-                    navigate_to(Some(node.path.clone()));
+                    navigate_to(Some(node.path.clone()), None);
                 }
             }
         })
@@ -372,7 +366,7 @@ pub fn Home() -> impl IntoView {
         let move_selection = move_selection.clone();
         let enter_selection = enter_selection.clone();
         let go_back = go_back.clone();
-        create_effect(move |_| {
+        Effect::new(move |_| {
             if listener_added_ref.get() {
                 return;
             }
@@ -448,6 +442,7 @@ pub fn Home() -> impl IntoView {
     }
 }
 
+/// 确保 `path` 的直接子节点已缓存在 `NodesCache` 中；若不存在则向后端请求。
 async fn ensure_children(path: &str, cache: RwSignal<NodesCache>) -> Result<(), String> {
     if cache.with(|map| map.contains_key(path)) {
         return Ok(());
@@ -466,6 +461,7 @@ async fn ensure_children(path: &str, cache: RwSignal<NodesCache>) -> Result<(), 
     Ok(())
 }
 
+/// 递归加载目标路径及其所有祖先，避免回退时出现缓存缺口。
 async fn ensure_path_and_ancestors(path: Option<&String>, cache: RwSignal<NodesCache>) -> Result<(), String> {
     ensure_children(ROOT_PATH, cache.clone()).await?;
 

@@ -4,6 +4,7 @@ use leptos::callback::{Callable, UnsyncCallback};
 
 use crate::DirectoryNode;
 
+/// OverviewB 组件：展示“当前层级”的所有节点，并提供选中 / 进入的交互。
 #[component]
 pub fn OverviewB(
     nodes: Memo<Vec<DirectoryNode>>,
@@ -19,6 +20,7 @@ pub fn OverviewB(
                 each=move || nodes.get().into_iter().enumerate()
                 key=|(idx, node)| format!("{}:{}", idx, node.path)
                 children=move |(idx, node): (usize, DirectoryNode)| {
+                    // 使用 Memo 保持“当前行是否被选中”的状态，便于在键盘导航时高亮
                     let is_selected = Memo::new({
                         let selected_index = selected_index.clone();
                         move |_| selected_index.get() == Some(idx)
@@ -39,10 +41,12 @@ pub fn OverviewB(
                                     }
                                 }
                                 on:click=move |_event: MouseEvent| {
+                                    // 单击仅改变选中项，不改变当前层级
                                     on_select.run(idx);
                                 }
                                 on:dblclick=move |_event: MouseEvent| {
                                     if has_subnodes {
+                                        // 双击进入下一层级
                                         on_enter.run(idx);
                                     }
                                 }

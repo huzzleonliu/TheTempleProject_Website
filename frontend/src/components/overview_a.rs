@@ -3,7 +3,7 @@ use leptos::callback::{Callable, UnsyncCallback};
 
 use crate::DirectoryNode;
 
-/// OverviewA 组件：显示面包屑/父级节点列表
+/// OverviewA 组件：展示“当前位置的父级层级”列表，帮助用户在层级间快速回退。
 #[component]
 pub fn OverviewA(
     nodes: Memo<Vec<DirectoryNode>>,
@@ -19,6 +19,7 @@ pub fn OverviewA(
                 children=move |node: DirectoryNode| {
                     let path = node.path.clone();
                     let label = node.raw_filename.clone();
+                    // highlighted_path 始终指向当前层级中的“高亮节点”路径
                     let highlight_signal = highlighted_path.clone();
                     let class_path = path.clone();
                     let click_path = path.clone();
@@ -41,6 +42,7 @@ pub fn OverviewA(
                                     }
                                 }
                                 on:click=move |_| {
+                                    // 空字符串代表根节点，转交给上层将其视作 None
                                     if click_path.is_empty() {
                                         on_select.run(None);
                                     } else {

@@ -1,12 +1,33 @@
 # The Temple Project
 
-## 项目说明
-这是我的个人网站的仓库，作者为Huzz，项目的名称为The Temple Project
+## 项目简介
+The Temple Project 是一个以 Rust 为核心的全栈网站，目标是构建个人创作与知识库的统一入口。
+项目分为前端、后端、数据库与静态资源服务四个部分，通过容器化方式部署，支持后续的长期扩展与维护。
 
+## 技术栈总览
+- **前端**：Leptos 0.8 + WebAssembly，三栏式导航界面，支持键盘快捷键与目录缓存。
+- **后端**：Axum + Tokio，提供目录结构 API。
+- **数据库**：PostgreSQL（启用 `ltree` 扩展）存储目录层级信息。
+- **部署**：Podman + podman-compose，Nginx 作为反向代理与静态资源分发。
 ## 部署方法
 使用podman-compose部署`podman-compose up -d `
 通过43.131.27.176:8080访问网站
 
+## 前端导航逻辑
+前端采用“基于路径的结构驱动”方案，所有导航行为都依赖节点的完整路径进行推导：
+1. `OverviewB` 展示当前路径的直接子节点；
+2. `OverviewA` 展示当前节点所在父层级，并高亮当前节点；
+3. `Preview` 根据 `OverviewB` 的选中项异步加载更深一层的内容；
+4. 所有鼠标和键盘操作汇聚到 `navigate_to(target_path, preferred_index)`，统一管理缓存、选中项和预览更新；
+5. 根层级会插入一个虚拟的 `/` 节点，帮助用户理解层级起点。
+
+### 快捷键速览
+| 快捷键 | 功能 |
+| --- | --- |
+| `j / k` | 在 `OverviewB` 中上下移动选中行 |
+| `l` | 进入当前选中节点（若存在子节点） |
+| `h` | 回退到父级目录，并高亮原节点 |
+| `Shift + J / Shift + K` | 在 `Preview` 中滚动 |
 
 ## 项目计划
 第一阶段这个项目预计将包含以下几个功能：
@@ -30,15 +51,38 @@
 - 多设备同步
 - 商用API及购买平台
 
-## 部署结构
-网站计划分为四个部分
-- 前端 使用Leptos Rust框架 端口:8081
-- 后端 使用Rust + axum框架 端口:8082
-- 数据库 使用PostgreSQL，用来保存数据中心的链接地址 端口:8083:5432
-- 图床 计划使用nginx做路由管理
-- 服务器 目前部署在腾讯云上，使用nginx做路由管理 端口:8080:80
-项目使用podman进行容器化部署，使用podman-compose进行编排
-仓库计划长期保留，以便后续迭代和迁移
+## 后端与数据库
+- 后端以 Axum 提供 RESTful API，包括根节点与指定路径子节点查询。
+- 数据库通过 `ltree` 存储目录树，支持高效的祖先/后代查询。
+- 后端接口返回统一的 `DirectoryNode` 数据结构（含路径、显示名称、是否存在子节点）。
+
+## 目录结构说明
+```
+TheTempleProject_Website/
+├── frontend/                # Leptos 前端
+│   ├── src/
+│   │   ├── pages/home.rs    # 三栏页面核心逻辑
+│   │   ├── components/      # UI 组件（OverviewA/B、Preview、键盘适配等）
+│   │   └── api.rs           # 前端 API 调用封装
+│   └── README.md            # 前端功能说明
+├── backend/                 #（预留）Axum 服务
+├── database/                # 数据库脚本与 README
+├── readme.md                # 当前文件
+└── podman-compose.yaml      # 容器编排配置
+```
+
+## 部署流程
+1. 安装 Podman 与 podman-compose。
+2. 在项目根目录执行：
+   ```bash
+   podman-compose up -d
+   ```
+3. 默认暴露端口：
+   - 前端：8081
+   - 后端：8082
+   - 数据库：5432（通过 8083 暴露）
+   - 入口 Nginx：8080
+4. 访问 `http://<服务器地址>:8080` 查看站点。
 
 ## 网站流程
 1. 用户访问网站
