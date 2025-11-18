@@ -10,7 +10,7 @@ pub fn Preview(
     scroll_container_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
     view! {
-        <div 
+        <div
             node_ref=scroll_container_ref
             class="h-full overflow-y-auto overflow-x-hidden px-2"
         >

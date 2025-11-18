@@ -1,28 +1,30 @@
-use leptos::prelude::*;
 use leptos::callback::{Callable, UnsyncCallback};
+use leptos::prelude::*;
 
-use crate::DirectoryNode;
+use crate::{NodeKind, UiNode};
 
 /// OverviewA 组件：展示“当前位置的父级层级”列表，帮助用户在层级间快速回退。
 #[component]
 pub fn OverviewA(
-    nodes: Memo<Vec<DirectoryNode>>,
+    nodes: Memo<Vec<UiNode>>,
     highlighted_path: Memo<Option<String>>,
-    #[prop(into)]
-    on_select: UnsyncCallback<Option<String>>,
+    #[prop(into)] on_select: UnsyncCallback<Option<String>>,
 ) -> impl IntoView {
     view! {
         <ul class="text-2xl text-gray-500 flex flex-col gap-1">
             <For
                 each=move || nodes.get().into_iter()
-                key=|node| node.path.clone()
-                children=move |node: DirectoryNode| {
-                    let path = node.path.clone();
-                    let label = node.raw_filename.clone();
-                    // highlighted_path 始终指向当前层级中的“高亮节点”路径
+                key=|node| node.id.clone()
+                children=move |node: UiNode| {
+                    let node_id = node.id.clone();
+                    let label = node.label.clone();
+                    let detail = node
+                        .raw_path
+                        .clone()
+                        .or_else(|| node.directory_path.clone())
+                        .unwrap_or_default();
                     let highlight_signal = highlighted_path.clone();
-                    let class_path = path.clone();
-                    let click_path = path.clone();
+                    let node_clone = node.clone();
 
                     view! {
                         <li class="w-full min-w-0">
@@ -32,7 +34,7 @@ pub fn OverviewA(
                                     let is_selected = highlight_signal
                                         .get()
                                         .as_ref()
-                                        .map(|selected| selected == &class_path)
+                                        .map(|selected| selected == &node_id)
                                         .unwrap_or(false);
 
                                     if is_selected {
@@ -42,16 +44,16 @@ pub fn OverviewA(
                                     }
                                 }
                                 on:click=move |_| {
-                                    // 空字符串代表根节点，转交给上层将其视作 None
-                                    if click_path.is_empty() {
-                                        on_select.run(None);
-                                    } else {
-                                        on_select.run(Some(click_path.clone()));
+                                    if matches!(node_clone.kind, NodeKind::Directory) {
+                                        match node_clone.directory_path.as_deref() {
+                                            Some("") | None => on_select.run(None),
+                                            Some(path) => on_select.run(Some(path.to_string())),
+                                        }
                                     }
                                 }
                             >
                                 {label}
-                                <div class="text-xs text-gray-600 break-all">{path.clone()}</div>
+                                <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
                             </button>
                         </li>
                     }

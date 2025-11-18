@@ -1,4 +1,6 @@
-use crate::database_ctl::directory::{api_get_child_directories, api_get_root_directories};
+use crate::database_ctl::directory::{
+    api_get_child_directories, api_get_node_assets, api_get_root_directories,
+};
 use crate::database_ctl::request_test::list_tables;
 use crate::return_code::print_code;
 use axum::{routing::get, Extension, Router};
@@ -31,6 +33,8 @@ async fn main() {
         .route("/nodes/root", get(api_get_root_directories))
         //获取子目录（路径需要 URL 编码）
         .route("/nodes/children/{path}", get(api_get_child_directories))
+        //获取节点对应的资源文件
+        .route("/nodes/assets/{path}", get(api_get_node_assets))
         //加入数据库连接池
         .layer(Extension(pool))
         // 设置 CORS
