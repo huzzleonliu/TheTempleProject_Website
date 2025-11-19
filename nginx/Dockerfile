@@ -1,5 +1,5 @@
 # FROM alpine:3.21.3
-FROM nginx:latest
+FROM docker.io/library/nginx:latest
 
 # RUN apk add --no-cache curl build-base git openssl-dev pkgconfig libgcc
 

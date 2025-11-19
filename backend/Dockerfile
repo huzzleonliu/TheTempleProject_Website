@@ -1,5 +1,5 @@
 # 构建阶段
-FROM rust:latest as builder
+FROM docker.io/library/rust:latest as builder
 
 # 设置工作目录
 WORKDIR /usr/src/app
@@ -20,7 +20,7 @@ COPY . .
 RUN cargo build --release
 
 # 运行阶段
-FROM debian:bookworm-slim
+FROM docker.io/library/debian:bookworm-slim
 
 # 安装运行时依赖
 RUN apt-get update && \

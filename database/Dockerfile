@@ -1,6 +1,6 @@
-# 基于 Nginx Alpine 镜像（轻量化）
+# 基于 PostgreSQL 镜像
 
-FROM postgres:latest
+FROM docker.io/library/postgres:latest
 
 
 ENV POSTGRES_DB=tp_db \

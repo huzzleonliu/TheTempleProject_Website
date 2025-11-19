@@ -1,4 +1,4 @@
-FROM nginx:latest
+FROM docker.io/library/nginx:latest
 
 RUN mkdir -p /run/nginx
 RUN mkdir -p /resource

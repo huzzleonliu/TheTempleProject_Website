@@ -1,6 +1,6 @@
 
 # Build stage
-FROM rust:latest 
+FROM docker.io/library/rust:latest 
 
 # 安装 Node.js 和 npm（使用 Debian 包管理器）
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
@@ -12,13 +12,24 @@ RUN cargo install trunk --locked
 # Set working directory
 WORKDIR /app
 
+# Copy package files first for better caching
+COPY package.json package-lock.json ./
+
+# 安装项目依赖（包括 tailwindcss 和 @tailwindcss/cli）
+RUN npm install
+
 # Copy project files
-COPY . .
+# COPY . .
+
+# 只复制必要的配置文件，不构建
+# 实际代码通过 volume 挂载
+COPY Trunk.toml ./
+COPY Cargo.toml Cargo.lock ./
 
 RUN rustup target add wasm32-unknown-unknown
 
 # Build the frontend
-RUN trunk build --release
+# RUN trunk build --release
 
 # Expose port 80
 EXPOSE 80
