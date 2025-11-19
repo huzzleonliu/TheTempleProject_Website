@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -6,6 +6,7 @@ use gloo_net::http::Request;
 use leptos::callback::UnsyncCallback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use pulldown_cmark::{html, Options, Parser};
 use serde_json;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -17,7 +18,6 @@ use crate::types::{
     parent_path, split_levels, AssetNode, AssetsCache, DirectoryNode, NodeKind, NodesCache,
     PreviewItem, UiNode, ROOT_PATH,
 };
-use pulldown_cmark::{html, Options, Parser};
 
 /// 封装 Home 页面所需的所有信号、派生数据与操作方法。
 pub struct HomeLogic {
@@ -354,10 +354,58 @@ impl HomeLogic {
                     }
                     Some(node) => match node.kind {
                         NodeKind::Overview => {
-                            preview_loading_signal.set(false);
                             preview_error_signal.set(None);
                             let overview_items = build_preview_items_from_ui_nodes(&nodes[1..]);
-                            preview_items_signal.set(overview_items);
+                            let markdown_indices: Vec<(usize, String)> = overview_items
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(idx, item)| {
+                                    if matches!(item.kind, NodeKind::Markdown) {
+                                        item.raw_path.clone().map(|path| (idx, path))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+
+                            if markdown_indices.is_empty() {
+                                preview_loading_signal.set(false);
+                                preview_items_signal.set(overview_items);
+                            } else {
+                                preview_loading_signal.set(true);
+                                let shared_items = Rc::new(RefCell::new(overview_items));
+                                let pending = Rc::new(Cell::new(markdown_indices.len()));
+
+                                preview_items_signal.set(shared_items.borrow().clone());
+
+                                for (idx, path) in markdown_indices {
+                                    let shared_items = shared_items.clone();
+                                    let pending = pending.clone();
+                                    let preview_items_signal = preview_items_signal.clone();
+                                    let preview_loading_signal = preview_loading_signal.clone();
+                                    let preview_error_signal = preview_error_signal.clone();
+                                    spawn_local(async move {
+                                        match fetch_text_asset(&path).await {
+                                            Ok(markdown) => {
+                                                let mut items = shared_items.borrow_mut();
+                                                if let Some(item) = items.get_mut(idx) {
+                                                    item.content = Some(render_markdown(&markdown));
+                                                }
+                                                preview_items_signal.set(items.clone());
+                                            }
+                                            Err(err) => {
+                                                preview_error_signal.set(Some(err));
+                                            }
+                                        }
+                                        let remaining = pending.get() - 1;
+                                        pending.set(remaining);
+                                        if remaining == 0 {
+                                            preview_loading_signal.set(false);
+                                        }
+                                    });
+                                }
+                            }
+
                             preview_path_signal.set(None);
                         }
                         NodeKind::Directory => {
@@ -405,7 +453,7 @@ impl HomeLogic {
                                 preview_error_signal.set(Some("无法定位 Markdown 文件".into()));
                             }
                         }
-                        _ => {
+                        NodeKind::Video | NodeKind::Image | NodeKind::Other => {
                             preview_loading_signal.set(false);
                             preview_error_signal.set(None);
                             preview_path_signal.set(None);
@@ -788,6 +836,7 @@ fn classify_asset_kind(filename: &str) -> NodeKind {
     let ext = filename.rsplit('.').next().map(|s| s.to_ascii_lowercase());
     match ext.as_deref() {
         Some("md") | Some("markdown") => NodeKind::Markdown,
+        Some("mp4") | Some("mov") | Some("webm") | Some("m4v") | Some("ogg") => NodeKind::Video,
         Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("bmp") | Some("svg")
         | Some("webp") | Some("ico") => NodeKind::Image,
         _ => NodeKind::Other,
@@ -821,10 +870,15 @@ async fn fetch_text_asset(path: &str) -> Result<String, String> {
 
 fn asset_to_url(path: &str) -> String {
     let normalized = path.replace('\\', "/");
-    if normalized.starts_with('/') {
+    if normalized.starts_with("http://") || normalized.starts_with("https://") {
         normalized
     } else {
-        format!("/{}", normalized)
+        let trimmed = normalized.trim_start_matches('/');
+        let origin = web_sys::window()
+            .and_then(|w| w.location().origin().ok())
+            .unwrap_or_else(|| "".to_string());
+        let base = origin.trim_end_matches('/');
+        format!("{}/resource/{}", base, trimmed)
     }
 }
 

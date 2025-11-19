@@ -25,6 +25,7 @@ pub struct AssetNode {
 pub enum NodeKind {
     Overview,
     Directory,
+    Video,
     Image,
     Markdown,
     Other,

@@ -97,6 +97,19 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
             }
             .into_any()
         }
+        NodeKind::Video => {
+            let path = raw_path.unwrap_or_default();
+            let src = asset_to_url(&path);
+            view! {
+                <div class="space-y-1">
+                    <video src=src.clone() controls class="w-full rounded shadow">
+                        <track kind="captions"/>
+                    </video>
+                    <div class="text-xs text-gray-400 break-all">{path}</div>
+                </div>
+            }
+            .into_any()
+        }
         NodeKind::Overview => view! { <div class="text-gray-500">"当前概览"</div> }.into_any(),
         NodeKind::Other => {
             let path = raw_path.unwrap_or_default();
@@ -113,9 +126,14 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
 
 fn asset_to_url(raw_path: &str) -> String {
     let normalized = raw_path.replace('\\', "/");
-    if normalized.starts_with('/') {
+    if normalized.starts_with("http://") || normalized.starts_with("https://") {
         normalized
     } else {
-        format!("/{}", normalized)
+        let trimmed = normalized.trim_start_matches('/');
+        let origin = web_sys::window()
+            .and_then(|w| w.location().origin().ok())
+            .unwrap_or_else(|| "".to_string());
+        let base = origin.trim_end_matches('/');
+        format!("{}/resource/{}", base, trimmed)
     }
 }
