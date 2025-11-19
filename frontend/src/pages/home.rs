@@ -19,7 +19,7 @@ pub fn Home() -> impl IntoView {
         overview_a_select_callback,
         preview_scroll_ref,
         overview_b_scroll_ref,
-        preview_nodes,
+        preview_items,
         preview_loading,
         preview_error,
         selected_index,
@@ -50,7 +50,7 @@ pub fn Home() -> impl IntoView {
                 </div>
                 <div class="col-span-5 h-full min-h-0 px-4 pt-0">
                     <Preview
-                        nodes=preview_nodes.read_only()
+                        items=preview_items.read_only()
                         loading=preview_loading.read_only()
                         error=preview_error.read_only()
                         scroll_container_ref=preview_scroll_ref

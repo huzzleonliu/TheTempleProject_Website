@@ -23,6 +23,7 @@ pub struct AssetNode {
 /// UI 列表节点类型
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum NodeKind {
+    Overview,
     Directory,
     Image,
     Markdown,
@@ -38,6 +39,18 @@ pub struct UiNode {
     pub directory_path: Option<String>,
     pub raw_path: Option<String>,
     pub has_children: bool,
+}
+
+/// 预览区域需要的节点/资源描述
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PreviewItem {
+    pub id: String,
+    pub label: String,
+    pub kind: NodeKind,
+    pub directory_path: Option<String>,
+    pub raw_path: Option<String>,
+    pub has_children: bool,
+    pub content: Option<String>,
 }
 
 /// 目录列表 API 响应体

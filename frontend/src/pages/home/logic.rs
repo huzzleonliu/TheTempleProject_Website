@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use gloo_net::http::Request;
 use leptos::callback::UnsyncCallback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -13,14 +14,15 @@ use wasm_bindgen::JsValue;
 use crate::api::{get_child_directories, get_node_assets, get_root_directories};
 use crate::components::keyboard_handlers;
 use crate::types::{
-    parent_path, split_levels, AssetNode, AssetsCache, DirectoryNode, NodeKind, NodesCache, UiNode,
-    ROOT_PATH,
+    parent_path, split_levels, AssetNode, AssetsCache, DirectoryNode, NodeKind, NodesCache,
+    PreviewItem, UiNode, ROOT_PATH,
 };
+use pulldown_cmark::{html, Options, Parser};
 
 /// 封装 Home 页面所需的所有信号、派生数据与操作方法。
 pub struct HomeLogic {
     pub selected_index: RwSignal<Option<usize>>,
-    pub preview_nodes: RwSignal<Vec<DirectoryNode>>,
+    pub preview_items: RwSignal<Vec<PreviewItem>>,
     pub preview_loading: RwSignal<bool>,
     pub preview_error: RwSignal<Option<String>>,
 
@@ -43,7 +45,7 @@ impl HomeLogic {
         let current_path = RwSignal::new(None::<String>);
         let selected_index = RwSignal::new(None::<usize>);
         let preview_path = RwSignal::new(None::<String>);
-        let preview_nodes = RwSignal::new(Vec::<DirectoryNode>::new());
+        let preview_items = RwSignal::new(Vec::<PreviewItem>::new());
         let preview_loading = RwSignal::new(false);
         let preview_error = RwSignal::new(None::<String>);
         let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
@@ -66,9 +68,25 @@ impl HomeLogic {
                         .unwrap_or_default()
                 };
 
-                let snapshot = build_ui_nodes(&directories, &assets);
-                log_nodes("current_nodes", &key, &snapshot);
-                snapshot
+                let mut nodes = build_ui_nodes(&directories, &assets);
+                let overview_label = "Overview".to_string();
+                let overview_node = UiNode {
+                    id: format!("overview:{}", key),
+                    label: overview_label,
+                    kind: NodeKind::Overview,
+                    directory_path: if key.is_empty() {
+                        None
+                    } else {
+                        Some(key.clone())
+                    },
+                    raw_path: None,
+                    has_children: false,
+                };
+                let mut combined = Vec::with_capacity(nodes.len() + 1);
+                combined.push(overview_node);
+                combined.append(&mut nodes);
+                log_nodes("current_nodes", &key, &combined);
+                combined
             }
         });
 
@@ -171,12 +189,7 @@ impl HomeLogic {
 
                     let normalized_idx = preferred_index
                         .and_then(|idx| if idx < nodes.len() { Some(idx) } else { None })
-                        .or_else(|| {
-                            nodes
-                                .iter()
-                                .position(|node| matches!(node.kind, NodeKind::Directory))
-                        })
-                        .or_else(|| Some(0));
+                        .or(Some(0));
 
                     selected_index.set(normalized_idx);
                     scroll_selected_into_view(&overview_b_scroll_ref, normalized_idx);
@@ -288,7 +301,7 @@ impl HomeLogic {
                             } else {
                                 Some(parent)
                             };
-                            navigate_to(target, Some(idx));
+                            navigate_to(target, Some(idx + 1));
                         }
                         Some(_) => navigate_to(None, None),
                         None => {}
@@ -302,6 +315,9 @@ impl HomeLogic {
             let current_nodes = current_nodes.clone();
             let selected_index_signal = selected_index.clone();
             let preview_path_signal = preview_path.clone();
+            let preview_items_signal = preview_items.clone();
+            let preview_loading_signal = preview_loading.clone();
+            let preview_error_signal = preview_error.clone();
             let overview_b_scroll_ref = overview_b_scroll_ref.clone();
             Effect::new(move |_| {
                 let nodes = current_nodes.get();
@@ -329,17 +345,74 @@ impl HomeLogic {
 
                 scroll_selected_into_view(&overview_b_scroll_ref, normalized_idx);
 
-                let preview = normalized_idx
-                    .and_then(|idx| nodes.get(idx))
-                    .and_then(|node| {
-                        if matches!(node.kind, NodeKind::Directory) && node.directory_path.is_some()
-                        {
-                            node.directory_path.clone()
-                        } else {
-                            None
+                match normalized_idx.and_then(|idx| nodes.get(idx)) {
+                    None => {
+                        preview_loading_signal.set(false);
+                        preview_error_signal.set(None);
+                        preview_items_signal.set(Vec::new());
+                        preview_path_signal.set(None);
+                    }
+                    Some(node) => match node.kind {
+                        NodeKind::Overview => {
+                            preview_loading_signal.set(false);
+                            preview_error_signal.set(None);
+                            let overview_items = build_preview_items_from_ui_nodes(&nodes[1..]);
+                            preview_items_signal.set(overview_items);
+                            preview_path_signal.set(None);
                         }
-                    });
-                preview_path_signal.set(preview);
+                        NodeKind::Directory => {
+                            if let Some(path) = node.directory_path.clone() {
+                                preview_loading_signal.set(true);
+                                preview_error_signal.set(None);
+                                preview_items_signal.set(Vec::new());
+                                preview_path_signal.set(Some(path));
+                            } else {
+                                preview_loading_signal.set(false);
+                                preview_error_signal.set(None);
+                                preview_items_signal.set(Vec::new());
+                                preview_path_signal.set(None);
+                            }
+                        }
+                        NodeKind::Markdown => {
+                            preview_loading_signal.set(true);
+                            preview_error_signal.set(None);
+                            preview_path_signal.set(None);
+                            preview_items_signal.set(Vec::new());
+
+                            if let Some(path) = node.raw_path.clone() {
+                                let preview_loading_signal = preview_loading_signal.clone();
+                                let preview_error_signal = preview_error_signal.clone();
+                                let preview_items_signal = preview_items_signal.clone();
+                                let item = preview_item_from_ui_node(node);
+                                spawn_local(async move {
+                                    match fetch_text_asset(&path).await {
+                                        Ok(content) => {
+                                            let mut rendered = item;
+                                            rendered.content = Some(render_markdown(&content));
+                                            preview_items_signal.set(vec![rendered]);
+                                            preview_loading_signal.set(false);
+                                            preview_error_signal.set(None);
+                                        }
+                                        Err(err) => {
+                                            preview_items_signal.set(Vec::new());
+                                            preview_loading_signal.set(false);
+                                            preview_error_signal.set(Some(err));
+                                        }
+                                    }
+                                });
+                            } else {
+                                preview_loading_signal.set(false);
+                                preview_error_signal.set(Some("无法定位 Markdown 文件".into()));
+                            }
+                        }
+                        _ => {
+                            preview_loading_signal.set(false);
+                            preview_error_signal.set(None);
+                            preview_path_signal.set(None);
+                            preview_items_signal.set(vec![preview_item_from_ui_node(node)]);
+                        }
+                    },
+                }
             });
         }
 
@@ -347,7 +420,7 @@ impl HomeLogic {
         {
             let preview_path_signal = preview_path.clone();
             let path_cache = path_cache.clone();
-            let preview_nodes = preview_nodes.clone();
+            let preview_items = preview_items.clone();
             let preview_loading = preview_loading.clone();
             let preview_error = preview_error.clone();
             Effect::new(move |_| {
@@ -355,25 +428,23 @@ impl HomeLogic {
                     preview_loading.set(true);
                     preview_error.set(None);
                     let path_cache = path_cache.clone();
-                    let preview_nodes = preview_nodes.clone();
+                    let preview_items = preview_items.clone();
                     let preview_loading = preview_loading.clone();
                     let preview_error = preview_error.clone();
                     spawn_local(async move {
                         if let Err(e) = ensure_children(&path, path_cache.clone()).await {
                             preview_error.set(Some(e));
-                            preview_nodes.set(Vec::new());
+                            preview_items.set(Vec::new());
                         } else {
-                            let nodes = path_cache
+                            let directories = path_cache
                                 .with(|map| map.get(&path).cloned())
                                 .unwrap_or_default();
                             preview_error.set(None);
-                            preview_nodes.set(nodes);
+                            preview_items.set(build_preview_items_from_directories(&directories));
                         }
                         preview_loading.set(false);
                     });
                 } else {
-                    preview_nodes.set(Vec::new());
-                    preview_error.set(None);
                     preview_loading.set(false);
                 }
             });
@@ -574,7 +645,7 @@ impl HomeLogic {
                             } else {
                                 Some(parent)
                             };
-                            navigate_to(target_layer, Some(idx));
+                            navigate_to(target_layer, Some(idx + 1));
                         }
                     }
                 });
@@ -583,7 +654,7 @@ impl HomeLogic {
 
         HomeLogic {
             selected_index,
-            preview_nodes,
+            preview_items,
             preview_loading,
             preview_error,
             current_nodes,
@@ -674,6 +745,45 @@ fn build_ui_nodes(directories: &[DirectoryNode], assets: &[AssetNode]) -> Vec<Ui
     nodes
 }
 
+fn build_preview_items_from_directories(directories: &[DirectoryNode]) -> Vec<PreviewItem> {
+    let mut items: Vec<PreviewItem> = directories
+        .iter()
+        .map(|dir| PreviewItem {
+            id: dir.path.clone(),
+            label: dir.raw_filename.clone(),
+            kind: NodeKind::Directory,
+            directory_path: Some(dir.path.clone()),
+            raw_path: None,
+            has_children: dir.has_subnodes,
+            content: None,
+        })
+        .collect();
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
+}
+
+fn build_preview_items_from_ui_nodes(nodes: &[UiNode]) -> Vec<PreviewItem> {
+    let mut items: Vec<PreviewItem> = nodes
+        .iter()
+        .filter(|node| !matches!(node.kind, NodeKind::Overview))
+        .map(preview_item_from_ui_node)
+        .collect();
+    items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    items
+}
+
+fn preview_item_from_ui_node(node: &UiNode) -> PreviewItem {
+    PreviewItem {
+        id: node.id.clone(),
+        label: node.label.clone(),
+        kind: node.kind.clone(),
+        directory_path: node.directory_path.clone(),
+        raw_path: node.raw_path.clone(),
+        has_children: node.has_children,
+        content: None,
+    }
+}
+
 fn classify_asset_kind(filename: &str) -> NodeKind {
     let ext = filename.rsplit('.').next().map(|s| s.to_ascii_lowercase());
     match ext.as_deref() {
@@ -696,6 +806,37 @@ fn scroll_selected_into_view(container_ref: &NodeRef<leptos::html::Div>, index: 
             }
         }
     }
+}
+
+async fn fetch_text_asset(path: &str) -> Result<String, String> {
+    let url = asset_to_url(path);
+    Request::get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn asset_to_url(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if normalized.starts_with('/') {
+        normalized
+    } else {
+        format!("/{}", normalized)
+    }
+}
+
+fn render_markdown(raw: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    let parser = Parser::new_ext(raw, options);
+
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
 }
 
 fn log_nodes(label: &str, path: &str, nodes: &[UiNode]) {

@@ -6,5 +6,5 @@ mod types;
 
 pub use types::{
     AssetNode, AssetsCache, AssetsResponse, DirectoriesResponse, DirectoryNode, NodeKind,
-    NodesCache, UiNode, ROOT_PATH,
+    NodesCache, PreviewItem, UiNode, ROOT_PATH,
 };
