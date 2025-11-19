@@ -1,5 +1,6 @@
 use crate::{NodeKind, PreviewItem};
 use leptos::prelude::*;
+use wasm_bindgen::JsValue;
 
 #[component]
 pub fn Preview(
@@ -8,6 +9,25 @@ pub fn Preview(
     error: ReadSignal<Option<String>>,
     scroll_container_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
+    {
+        let items = items.clone();
+        let loading = loading.clone();
+        let error = error.clone();
+        Effect::new(move |_| {
+            let snapshot = items.get();
+            let serialized =
+                serde_json::to_string(&snapshot).unwrap_or_else(|_| "[]".to_string());
+            let loading_state = loading.get();
+            let error_state = error.get();
+            web_sys::console::log_4(
+                &JsValue::from_str("[Preview]"),
+                &JsValue::from_str(&format!("loading={loading_state}")),
+                &JsValue::from_str(&format!("error={error_state:?}")),
+                &JsValue::from_str(&serialized),
+            );
+        });
+    }
+
     view! {
         <div
             node_ref=scroll_container_ref
@@ -28,7 +48,7 @@ pub fn Preview(
                                         <div class="space-y-3">
                                             <For
                                                 each=move || items.get()
-                                                key=|item| item.id.clone()
+                        key=|item| format!("{}:{}", item.id, item.content.is_some() as u8)
                                                 children=move |item: PreviewItem| {
                                                     render_preview_item(item)
                                                 }
