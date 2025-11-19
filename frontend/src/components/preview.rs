@@ -46,9 +46,14 @@ pub fn Preview(
                                         fallback=move || view! { <div class="text-gray-500">"暂无内容"</div> }
                                     >
                                         <div class="space-y-3">
-                                            <For
-                                                each=move || items.get()
-                        key=|item| format!("{}:{}", item.id, item.content.is_some() as u8)
+                        <For
+                            each=move || items.get()
+                                key=|item| format!(
+                                    "{}:{}:{}",
+                                    item.id,
+                                    item.content.is_some() as u8,
+                                    item.display_as_entry as u8
+                                )
                                                 children=move |item: PreviewItem| {
                                                     render_preview_item(item)
                                                 }
@@ -78,7 +83,12 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
         raw_path,
         has_children,
         content,
+        display_as_entry,
     } = item;
+
+    if display_as_entry {
+        return render_listing_entry(kind, label, directory_path, raw_path, has_children);
+    }
 
     match kind {
         NodeKind::Directory => {
@@ -142,6 +152,47 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
             .into_any()
         }
     }
+}
+
+fn render_listing_entry(
+    kind: NodeKind,
+    label: String,
+    directory_path: Option<String>,
+    raw_path: Option<String>,
+    has_children: bool,
+) -> AnyView {
+    let detail = directory_path
+        .clone()
+        .or(raw_path.clone())
+        .unwrap_or_default();
+
+    let badge = match kind {
+        NodeKind::Directory => {
+            if has_children {
+                "[目录 • +]"
+            } else {
+                "[目录]"
+            }
+        }
+        NodeKind::Markdown => "[Markdown]",
+        NodeKind::Image => "[图片]",
+        NodeKind::Video => "[视频]",
+        NodeKind::Other => "[文件]",
+        NodeKind::Overview => "[Overview]",
+    };
+
+    view! {
+        <div class="w-full min-w-0">
+            <div class="w-full text-left truncate text-2xl px-2 py-2 rounded text-gray-400 bg-gray-900/40 border border-gray-800">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500">{badge}</span>
+                    <span class="text-gray-100">{label.clone()}</span>
+                </div>
+                <div class="text-xs text-gray-600 break-all mt-1">{detail}</div>
+            </div>
+        </div>
+    }
+    .into_any()
 }
 
 fn asset_to_url(raw_path: &str) -> String {

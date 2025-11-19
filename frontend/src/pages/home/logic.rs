@@ -468,6 +468,7 @@ impl HomeLogic {
         {
             let preview_path_signal = preview_path.clone();
             let path_cache = path_cache.clone();
+            let assets_cache = assets_cache.clone();
             let preview_items = preview_items.clone();
             let preview_loading = preview_loading.clone();
             let preview_error = preview_error.clone();
@@ -476,19 +477,29 @@ impl HomeLogic {
                     preview_loading.set(true);
                     preview_error.set(None);
                     let path_cache = path_cache.clone();
+                    let assets_cache = assets_cache.clone();
                     let preview_items = preview_items.clone();
                     let preview_loading = preview_loading.clone();
                     let preview_error = preview_error.clone();
                     spawn_local(async move {
-                        if let Err(e) = ensure_children(&path, path_cache.clone()).await {
+                        let dirs_result = ensure_children(&path, path_cache.clone()).await;
+                        let assets_result = ensure_assets(&path, assets_cache.clone()).await;
+                        if let Err(e) = dirs_result {
+                            preview_error.set(Some(e));
+                            preview_items.set(Vec::new());
+                        } else if let Err(e) = assets_result {
                             preview_error.set(Some(e));
                             preview_items.set(Vec::new());
                         } else {
                             let directories = path_cache
                                 .with(|map| map.get(&path).cloned())
                                 .unwrap_or_default();
+                            let assets = assets_cache
+                                .with(|map| map.get(&path).cloned())
+                                .unwrap_or_default();
                             preview_error.set(None);
-                            preview_items.set(build_preview_items_from_directories(&directories));
+                            preview_items
+                                .set(build_preview_items_for_path(&directories, &assets));
                         }
                         preview_loading.set(false);
                     });
@@ -793,8 +804,11 @@ fn build_ui_nodes(directories: &[DirectoryNode], assets: &[AssetNode]) -> Vec<Ui
     nodes
 }
 
-fn build_preview_items_from_directories(directories: &[DirectoryNode]) -> Vec<PreviewItem> {
-    let mut items: Vec<PreviewItem> = directories
+fn build_preview_items_for_path(
+    directories: &[DirectoryNode],
+    assets: &[AssetNode],
+) -> Vec<PreviewItem> {
+    let mut dir_items: Vec<PreviewItem> = directories
         .iter()
         .map(|dir| PreviewItem {
             id: dir.path.clone(),
@@ -804,20 +818,51 @@ fn build_preview_items_from_directories(directories: &[DirectoryNode]) -> Vec<Pr
             raw_path: None,
             has_children: dir.has_subnodes,
             content: None,
+            display_as_entry: true,
         })
         .collect();
-    items.sort_by_key(|item| item.label.to_ascii_lowercase());
-    items
+    dir_items.sort_by_key(|item| item.label.to_ascii_lowercase());
+
+    let mut asset_items: Vec<PreviewItem> = assets
+        .iter()
+        .map(|asset| PreviewItem {
+            id: asset.file_path.clone(),
+            label: asset.raw_filename.clone(),
+            kind: classify_asset_kind(&asset.raw_filename),
+            directory_path: None,
+            raw_path: Some(asset.raw_path.clone()),
+            has_children: false,
+            content: None,
+            display_as_entry: true,
+        })
+        .collect();
+    asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
+
+    dir_items.extend(asset_items);
+    dir_items
 }
 
 fn build_preview_items_from_ui_nodes(nodes: &[UiNode]) -> Vec<PreviewItem> {
-    let mut items: Vec<PreviewItem> = nodes
+    let mut dir_items = Vec::new();
+    let mut asset_items = Vec::new();
+
+    for node in nodes
         .iter()
         .filter(|node| !matches!(node.kind, NodeKind::Overview))
-        .map(preview_item_from_ui_node)
-        .collect();
-    items.sort_by_key(|item| item.label.to_ascii_lowercase());
-    items
+    {
+        let item = preview_item_from_ui_node(node);
+        if matches!(item.kind, NodeKind::Directory) {
+            dir_items.push(item);
+        } else {
+            asset_items.push(item);
+        }
+    }
+
+    dir_items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
+
+    dir_items.extend(asset_items);
+    dir_items
 }
 
 fn preview_item_from_ui_node(node: &UiNode) -> PreviewItem {
@@ -829,6 +874,7 @@ fn preview_item_from_ui_node(node: &UiNode) -> PreviewItem {
         raw_path: node.raw_path.clone(),
         has_children: node.has_children,
         content: None,
+        display_as_entry: false,
     }
 }
 

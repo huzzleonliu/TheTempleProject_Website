@@ -52,6 +52,7 @@ pub struct PreviewItem {
     pub raw_path: Option<String>,
     pub has_children: bool,
     pub content: Option<String>,
+    pub display_as_entry: bool,
 }
 
 /// 目录列表 API 响应体

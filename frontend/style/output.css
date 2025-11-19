@@ -317,11 +317,17 @@
   .flex-col {
     flex-direction: column;
   }
+  .items-center {
+    align-items: center;
+  }
   .items-start {
     align-items: flex-start;
   }
   .gap-1 {
     gap: calc(var(--spacing) * 1);
+  }
+  .gap-2 {
+    gap: calc(var(--spacing) * 2);
   }
   .space-y-1 {
     :where(& > :not(:last-child)) {
@@ -365,6 +371,9 @@
     border-style: var(--tw-border-style);
     border-width: 1px;
   }
+  .border-gray-800 {
+    border-color: var(--color-gray-800);
+  }
   .bg-black {
     background-color: var(--color-black);
   }
@@ -373,6 +382,12 @@
   }
   .bg-gray-900 {
     background-color: var(--color-gray-900);
+  }
+  .bg-gray-900\/40 {
+    background-color: color-mix(in srgb, oklch(21% 0.034 264.665) 40%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-gray-900) 40%, transparent);
+    }
   }
   .px-2 {
     padding-inline: calc(var(--spacing) * 2);
