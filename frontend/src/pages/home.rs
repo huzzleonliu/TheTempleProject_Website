@@ -18,6 +18,7 @@ pub fn Home() -> impl IntoView {
         enter_index_callback,
         overview_a_select_callback,
         preview_scroll_ref,
+        overview_b_scroll_ref,
         preview_nodes,
         preview_loading,
         preview_error,
@@ -38,9 +39,10 @@ pub fn Home() -> impl IntoView {
                         on_select=overview_a_select_callback
                     />
                 </div>
-                <div class="col-span-3 overflow-y-auto px-4 pt-0">
+                <div class="col-span-3 h-full min-h-0 px-4 pt-0">
                     <OverviewB
                         nodes=current_nodes
+                        scroll_container_ref=overview_b_scroll_ref
                         selected_index=selected_index.read_only()
                         on_select=select_index_callback
                         on_enter=enter_index_callback

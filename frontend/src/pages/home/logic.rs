@@ -33,6 +33,7 @@ pub struct HomeLogic {
     pub overview_a_select_callback: UnsyncCallback<Option<String>>,
 
     pub preview_scroll_ref: NodeRef<leptos::html::Div>,
+    pub overview_b_scroll_ref: NodeRef<leptos::html::Div>,
 }
 
 impl HomeLogic {
@@ -46,6 +47,7 @@ impl HomeLogic {
         let preview_loading = RwSignal::new(false);
         let preview_error = RwSignal::new(None::<String>);
         let preview_scroll_ref = NodeRef::<leptos::html::Div>::new();
+        let overview_b_scroll_ref = NodeRef::<leptos::html::Div>::new();
 
         let current_nodes = Memo::new({
             let path_cache = path_cache.clone();
@@ -104,12 +106,15 @@ impl HomeLogic {
         let select_index_inner = Rc::new({
             let selected_index = selected_index.clone();
             let current_nodes = current_nodes.clone();
+            let overview_b_scroll_ref = overview_b_scroll_ref.clone();
             move |idx: usize| {
                 let len = current_nodes.get_untracked().len();
                 if len == 0 {
                     selected_index.set(None);
+                    scroll_selected_into_view(&overview_b_scroll_ref, None);
                 } else if idx < len {
                     selected_index.set(Some(idx));
+                    scroll_selected_into_view(&overview_b_scroll_ref, Some(idx));
                 }
             }
         });
@@ -122,6 +127,7 @@ impl HomeLogic {
             let selected_index = selected_index.clone();
             let preview_path = preview_path.clone();
             let current_nodes = current_nodes.clone();
+            let overview_b_scroll_ref = overview_b_scroll_ref.clone();
             move |target: Option<String>, preferred_index: Option<usize>| {
                 let path_cache = path_cache.clone();
                 let assets_cache = assets_cache.clone();
@@ -129,6 +135,7 @@ impl HomeLogic {
                 let selected_index = selected_index.clone();
                 let preview_path = preview_path.clone();
                 let current_nodes = current_nodes.clone();
+                let overview_b_scroll_ref = overview_b_scroll_ref.clone();
                 spawn_local(async move {
                     log_target("[导航] 请求", target.as_deref());
                     if let Err(e) =
@@ -158,6 +165,7 @@ impl HomeLogic {
                     if nodes.is_empty() {
                         selected_index.set(None);
                         preview_path.set(None);
+                        scroll_selected_into_view(&overview_b_scroll_ref, None);
                         return;
                     }
 
@@ -171,12 +179,12 @@ impl HomeLogic {
                         .or_else(|| Some(0));
 
                     selected_index.set(normalized_idx);
+                    scroll_selected_into_view(&overview_b_scroll_ref, normalized_idx);
 
                     let preview = normalized_idx
                         .and_then(|idx| nodes.get(idx))
                         .and_then(|node| {
                             if matches!(node.kind, NodeKind::Directory)
-                                && node.has_children
                                 && node.directory_path.is_some()
                             {
                                 node.directory_path.clone()
@@ -193,10 +201,12 @@ impl HomeLogic {
         let move_selection = Rc::new({
             let selected_index = selected_index.clone();
             let current_nodes = current_nodes.clone();
+            let overview_b_scroll_ref = overview_b_scroll_ref.clone();
             move |delta: i32| {
                 let len = current_nodes.get_untracked().len() as i32;
                 if len == 0 {
                     selected_index.set(None);
+                    scroll_selected_into_view(&overview_b_scroll_ref, None);
                     return;
                 }
 
@@ -204,6 +214,7 @@ impl HomeLogic {
                 let next = (current + delta).clamp(0, len - 1);
                 if current != next {
                     selected_index.set(Some(next as usize));
+                    scroll_selected_into_view(&overview_b_scroll_ref, Some(next as usize));
                 }
             }
         });
@@ -215,9 +226,7 @@ impl HomeLogic {
             move || {
                 if let Some(idx) = selected_index.get_untracked() {
                     if let Some(node) = current_nodes.get_untracked().get(idx) {
-                        if matches!(node.kind, NodeKind::Directory)
-                            && node.has_children
-                            && node.directory_path.is_some()
+                        if matches!(node.kind, NodeKind::Directory) && node.directory_path.is_some()
                         {
                             navigate_to(node.directory_path.clone(), None);
                         }
@@ -293,6 +302,7 @@ impl HomeLogic {
             let current_nodes = current_nodes.clone();
             let selected_index_signal = selected_index.clone();
             let preview_path_signal = preview_path.clone();
+            let overview_b_scroll_ref = overview_b_scroll_ref.clone();
             Effect::new(move |_| {
                 let nodes = current_nodes.get();
                 let len = nodes.len();
@@ -317,12 +327,12 @@ impl HomeLogic {
                     selected_index_signal.set(normalized_idx);
                 }
 
+                scroll_selected_into_view(&overview_b_scroll_ref, normalized_idx);
+
                 let preview = normalized_idx
                     .and_then(|idx| nodes.get(idx))
                     .and_then(|node| {
-                        if matches!(node.kind, NodeKind::Directory)
-                            && node.has_children
-                            && node.directory_path.is_some()
+                        if matches!(node.kind, NodeKind::Directory) && node.directory_path.is_some()
                         {
                             node.directory_path.clone()
                         } else {
@@ -377,6 +387,7 @@ impl HomeLogic {
             let selected_index = selected_index.clone();
             let preview_path = preview_path.clone();
             let current_nodes = current_nodes.clone();
+            let overview_b_scroll_ref = overview_b_scroll_ref.clone();
             Effect::new(move |_| {
                 if initialized.get() {
                     return;
@@ -410,9 +421,7 @@ impl HomeLogic {
                     selected_index.set(default_idx);
 
                     let preview = default_idx.and_then(|idx| nodes.get(idx)).and_then(|node| {
-                        if matches!(node.kind, NodeKind::Directory)
-                            && node.has_children
-                            && node.directory_path.is_some()
+                        if matches!(node.kind, NodeKind::Directory) && node.directory_path.is_some()
                         {
                             node.directory_path.clone()
                         } else {
@@ -420,6 +429,7 @@ impl HomeLogic {
                         }
                     });
                     preview_path.set(preview);
+                    scroll_selected_into_view(&overview_b_scroll_ref, default_idx);
                 });
             });
         }
@@ -442,6 +452,7 @@ impl HomeLogic {
                 let enter_selection = enter_selection_cb.clone();
                 let go_back = go_back_cb.clone();
                 let preview_scroll_ref = preview_scroll_ref_clone;
+                let overview_scroll_ref = overview_b_scroll_ref.clone();
 
                 let handle_global_keydown =
                     Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
@@ -463,6 +474,7 @@ impl HomeLogic {
                             enter_selection.clone(),
                             go_back.clone(),
                             preview_scroll_ref.clone(),
+                            overview_scroll_ref.clone(),
                         );
                     })
                         as Box<dyn FnMut(web_sys::KeyboardEvent)>);
@@ -501,10 +513,7 @@ impl HomeLogic {
             let navigate_to = navigate_to.clone();
             UnsyncCallback::new(move |idx: usize| {
                 if let Some(node) = current_nodes.get_untracked().get(idx) {
-                    if matches!(node.kind, NodeKind::Directory)
-                        && node.has_children
-                        && node.directory_path.is_some()
-                    {
+                    if matches!(node.kind, NodeKind::Directory) && node.directory_path.is_some() {
                         navigate_to(node.directory_path.clone(), None);
                     }
                 }
@@ -584,6 +593,7 @@ impl HomeLogic {
             enter_index_callback,
             overview_a_select_callback,
             preview_scroll_ref,
+            overview_b_scroll_ref,
         }
     }
 }
@@ -671,6 +681,20 @@ fn classify_asset_kind(filename: &str) -> NodeKind {
         Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("bmp") | Some("svg")
         | Some("webp") | Some("ico") => NodeKind::Image,
         _ => NodeKind::Other,
+    }
+}
+
+fn scroll_selected_into_view(container_ref: &NodeRef<leptos::html::Div>, index: Option<usize>) {
+    if let Some(idx) = index {
+        if let Some(container) = container_ref.get() {
+            if let Some(element) = container.dyn_ref::<web_sys::Element>().and_then(|el| {
+                el.query_selector(&format!(r#"[data-index="{}"]"#, idx))
+                    .ok()
+                    .flatten()
+            }) {
+                element.scroll_into_view_with_bool(false);
+            }
+        }
     }
 }
 
