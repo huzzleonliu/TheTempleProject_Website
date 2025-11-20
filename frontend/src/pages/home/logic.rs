@@ -453,7 +453,7 @@ impl HomeLogic {
                                 preview_error_signal.set(Some("无法定位 Markdown 文件".into()));
                             }
                         }
-                        NodeKind::Video | NodeKind::Image | NodeKind::Other => {
+                        NodeKind::Video | NodeKind::Image | NodeKind::Pdf | NodeKind::Other => {
                             preview_loading_signal.set(false);
                             preview_error_signal.set(None);
                             preview_path_signal.set(None);
@@ -885,6 +885,7 @@ fn classify_asset_kind(filename: &str) -> NodeKind {
         Some("mp4") | Some("mov") | Some("webm") | Some("m4v") | Some("ogg") => NodeKind::Video,
         Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("bmp") | Some("svg")
         | Some("webp") | Some("ico") => NodeKind::Image,
+        Some("pdf") => NodeKind::Pdf,
         _ => NodeKind::Other,
     }
 }

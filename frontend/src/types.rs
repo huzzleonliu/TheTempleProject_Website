@@ -27,6 +27,7 @@ pub enum NodeKind {
     Directory,
     Video,
     Image,
+    Pdf,
     Markdown,
     Other,
 }

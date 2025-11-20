@@ -140,6 +140,21 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
             }
             .into_any()
         }
+        NodeKind::Pdf => {
+            let path = raw_path.unwrap_or_default();
+            let src = asset_to_url(&path);
+            let iframe_src = src.clone();
+            view! {
+                <div class="space-y-2">
+                    <div class="font-semibold text-lg text-gray-100">{label.clone()}</div>
+                    <object data=src type="application/pdf" class="w-full h-[75vh] rounded border border-gray-700 bg-gray-900">
+                        <iframe src=iframe_src class="w-full h-full rounded" title=label.clone()></iframe>
+                    </object>
+                    <div class="text-xs text-gray-500 break-all">{path}</div>
+                </div>
+            }
+            .into_any()
+        }
         NodeKind::Overview => view! { <div class="text-gray-500">"当前概览"</div> }.into_any(),
         NodeKind::Other => {
             let path = raw_path.unwrap_or_default();
@@ -177,6 +192,7 @@ fn render_listing_entry(
         NodeKind::Markdown => "[Markdown]",
         NodeKind::Image => "[图片]",
         NodeKind::Video => "[视频]",
+        NodeKind::Pdf => "[PDF]",
         NodeKind::Other => "[文件]",
         NodeKind::Overview => "[Overview]",
     };
