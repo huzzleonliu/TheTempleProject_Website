@@ -45,3 +45,7 @@ tailwindcss = "4.1.0"
 [[proxy]]
 rewrite = "/api"
 backend = "http://tp_backend.:80"
+
+[[proxy]]
+rewrite = "/resource"
+backend = "http://tp_resource.:80/resource"
