@@ -2,16 +2,16 @@
 
 ## 项目概览
 - 使用 **Leptos 0.8** 构建的单页应用，编译为 WebAssembly，并通过 `wasm-bindgen` 与浏览器交互。
-- 页面采用三栏布局：左侧 `OverviewA`、中间 `OverviewB`、右侧 `Preview`，协同展示层级目录与子内容。
+- 桌面端采用三栏布局：左侧 **Overview 栏**、中间 **Present 栏**、右侧 **Detail 栏**，协同展示层级目录与节点内容。
 - 数据由后端 Axum API 提供，前端使用基于路径的缓存减少重复请求。
 
 ## 组件结构
 | 组件 | 作用 | 说明 |
 | --- | --- | --- |
 | `pages::home::Home` | 页面入口 | 维护全局状态、处理 API 请求、注册键盘事件 |
-| `components::overview_a` | 父级导航列 | 展示当前层级的父目录列表，点击可回退并高亮目标节点 |
-| `components::overview_b` | 当前层级列表 | 展示 `current_path` 的直接子节点，支持单击选中、双击进入 |
-| `components::preview` | 子节点预览 | 异步加载当前选中节点的子节点，支持滚动 |
+| `components::overview_column` | Overview 栏 | 展示当前层级的父节点，点击可回退并高亮目标节点 |
+| `components::present_column` | Present 栏 | 展示 `current_path` 的直接子节点，支持单击选中、双击进入 |
+| `components::detail_panel` | Detail 栏 | 根据选中节点加载子内容或文件详情，支持 Markdown / PDF / 媒体 |
 | `components::keyboard_handlers` | 键盘适配层 | 将 `h/j/k/l`、`Shift+J/K` 等快捷键映射到导航/滚动逻辑 |
 
 ## 状态与缓存
@@ -20,13 +20,13 @@
 - `current_path: RwSignal<Option<String>>`
   - `None` 表示根层级，`Some(path)` 表示当前聚焦的目录。
 - `selected_index: RwSignal<Option<usize>>`
-  - 追踪 `OverviewB` 中的高亮行；导航时通过 Memo 自动同步。
-- `preview_path, preview_nodes, preview_loading, preview_error`
-  - 控制右侧预览列的数据加载与状态提示。
+  - 追踪 Present 栏中的高亮行；导航时通过 Memo 自动同步。
+- `detail_path, detail_items, detail_loading, detail_error`
+  - 控制 Detail 栏的数据加载、渲染与错误状态。
 - `Memo<Vec<DirectoryNode>>`
-  - `current_children`：当前层级的所有子节点（供 `OverviewB` 使用）。
-  - `overview_a_nodes`：当前层级所在父目录下的节点列表，用于左侧栏。
-  - `overview_a_highlight`：需要在 `OverviewA` 中高亮的路径。
+  - `present_nodes`：当前层级的所有子节点（供 Present 栏使用）。
+  - `overview_nodes`：当前层级所在父路径下的节点列表，用于 Overview 栏。
+  - `overview_highlight`：需要在 Overview 栏中高亮的路径。
 
 ## 导航流程
 1. **进入/回退** 调用 `navigate_to(target_path, preferred_index)`：
@@ -39,7 +39,7 @@
    - `l`：进入当前选中节点（若存在子节点）。
    - `h`：回退到父级目录，并保持原节点高亮。
    - `Shift + J / K`：在 Preview 中滚动。
-4. **根层级体验**：当处于根层级时，`OverviewA` 会展示一个虚拟的 `/` 节点，帮助用户理解层级起点。
+4. **根层级体验**：当处于根层级时，Overview 栏会展示一个虚拟的 `/` 节点，帮助用户理解层级起点。
 
 ## API 交互
 - `api::get_root_directories()`：获取根节点列表。

@@ -7,6 +7,11 @@
 - 资源扫描（--visual-scan）：扫描各节点中的 visual_assets/ 下的“直接文件”，输出文件路径 CSV（不递归子目录）
 两种 CSV 均可直接导入 PostgreSQL（推荐使用 ltree 扩展）。
 
+## 与前端布局的对齐
+- 前端已经统一为 Overview / Present / Detail 三栏，所有层级实体在 UI 中都称为 `node`。
+- 本工具输出的 CSV 字段需保持 `node` 命名，避免再混用 `directory` 等术语，以便前端直接映射为 Overview / Present / Detail 所需的节点列表。
+- Detail 栏会根据节点类型决定呈现方式（目录 → 列表项、文件 → 渲染内容），因此 `has_subnodes`、`raw_filename` 等字段仍是必要的输入。
+
 ## 功能特性
 
 ### 1. 统一忽略策略

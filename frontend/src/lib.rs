@@ -5,6 +5,6 @@ mod pages;
 mod types;
 
 pub use types::{
-    AssetNode, AssetsCache, AssetsResponse, DirectoriesResponse, DirectoryNode, NodeKind,
-    NodesCache, PreviewItem, UiNode, ROOT_PATH,
+    AssetNode, AssetsCache, AssetsResponse, DetailItem, DirectoriesResponse, DirectoryNode,
+    NodeKind, NodesCache, UiNode, ROOT_PATH,
 };

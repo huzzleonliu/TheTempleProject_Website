@@ -4,6 +4,10 @@
 
 这是一个用于复制目录下所有 `visual_assets` 目录的命令行工具。工具会递归查找源目录下的所有 `visual_assets` 目录，并将它们复制到目标目录（默认 `~/Desktop`），同时保持原有的目录结构。
 
+## 与 Detail 栏的配合
+- 前端 Detail 栏会将 `visual_assets` 中的文件视为节点内容，因此复制脚本需要完整保留层级，确保节点仍能在前端以 `node` 形式渲染。
+- 复制结果与 `node-generate-tool` 输出的 `file_path` 保持一致命名，便于在 Overview / Present / Detail 之间对齐节点标识。
+
 ## 功能特性
 
 - **递归查找**: 自动递归查找源目录下的所有 `visual_assets` 目录

@@ -43,9 +43,9 @@ pub struct UiNode {
     pub has_children: bool,
 }
 
-/// 预览区域需要的节点/资源描述
+/// Detail 栏展示所需的节点/资源描述
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PreviewItem {
+pub struct DetailItem {
     pub id: String,
     pub label: String,
     pub kind: NodeKind,

@@ -3,9 +3,9 @@ use leptos::prelude::*;
 
 use crate::{NodeKind, UiNode};
 
-/// OverviewA 组件：展示“当前位置的父级层级”列表，帮助用户在层级间快速回退。
+/// Overview 栏：展示“当前位置的父级层级”列表，帮助用户在层级间快速回退。
 #[component]
-pub fn OverviewA(
+pub fn OverviewColumn(
     nodes: Memo<Vec<UiNode>>,
     highlighted_path: Memo<Option<String>>,
     #[prop(into)] on_select: UnsyncCallback<Option<String>>,

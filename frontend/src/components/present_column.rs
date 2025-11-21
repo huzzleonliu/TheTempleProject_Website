@@ -5,18 +5,18 @@ use wasm_bindgen::JsValue;
 
 use crate::{NodeKind, UiNode};
 
-fn log_overview_b_state(nodes: &[UiNode], selected: Option<usize>) {
+fn log_present_state(nodes: &[UiNode], selected: Option<usize>) {
     let serialized = serde_json::to_string(nodes).unwrap_or_else(|_| "[]".to_string());
     web_sys::console::log_3(
-        &JsValue::from_str("[OverviewB]"),
+        &JsValue::from_str("[PresentColumn]"),
         &JsValue::from_str(&format!("selected={selected:?}")),
         &JsValue::from_str(&serialized),
     );
 }
 
-/// OverviewB 组件：展示“当前层级”的所有节点，并提供选中 / 进入的交互。
+/// Present 栏：展示“当前层级”的所有节点，并提供选中 / 进入的交互。
 #[component]
-pub fn OverviewB(
+pub fn PresentColumn(
     nodes: Memo<Vec<UiNode>>,
     #[prop(optional)] scroll_container_ref: NodeRef<leptos::html::Div>,
     selected_index: ReadSignal<Option<usize>>,
@@ -29,7 +29,7 @@ pub fn OverviewB(
         let nodes = nodes.clone();
         let selected_index = selected_index.clone();
         Effect::new(move |_| {
-            log_overview_b_state(&nodes.get(), selected_index.get());
+            log_present_state(&nodes.get(), selected_index.get());
         });
     }
 

@@ -1,15 +1,15 @@
-use crate::{NodeKind, PreviewItem};
+use crate::{DetailItem, NodeKind};
 use leptos::prelude::*;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
 #[component]
-pub fn Preview(
-    items: ReadSignal<Vec<PreviewItem>>,
+pub fn DetailPanel(
+    items: ReadSignal<Vec<DetailItem>>,
     loading: ReadSignal<bool>,
     error: ReadSignal<Option<String>>,
     scroll_container_ref: NodeRef<leptos::html::Div>,
-    #[prop(optional_no_strip)] on_directory_click: Option<Arc<dyn Fn(PreviewItem) + Send + Sync>>,
+    #[prop(optional_no_strip)] on_node_click: Option<Arc<dyn Fn(DetailItem) + Send + Sync>>,
 ) -> impl IntoView {
     {
         let items = items.clone();
@@ -21,7 +21,7 @@ pub fn Preview(
             let loading_state = loading.get();
             let error_state = error.get();
             web_sys::console::log_4(
-                &JsValue::from_str("[Preview]"),
+                &JsValue::from_str("[DetailPanel]"),
                 &JsValue::from_str(&format!("loading={loading_state}")),
                 &JsValue::from_str(&format!("error={error_state:?}")),
                 &JsValue::from_str(&serialized),
@@ -66,7 +66,7 @@ pub fn Preview(
                         view! { <div class="text-gray-500">{message}</div> }.into_any()
                     }
                     RenderState::Content => {
-                        let on_directory_click = on_directory_click.clone();
+                        let on_node_click = on_node_click.clone();
                         view! {
                             <div class="space-y-3">
                                 <For
@@ -77,10 +77,10 @@ pub fn Preview(
                                         item.content.is_some() as u8,
                                         item.display_as_entry as u8
                                     )
-                                    children=move |item: PreviewItem| {
-                                        render_preview_item(
+                                    children=move |item: DetailItem| {
+                                        render_detail_item(
                                             item,
-                                            on_directory_click.clone(),
+                                            on_node_click.clone(),
                                         )
                                     }
                                 />
@@ -96,15 +96,15 @@ pub fn Preview(
     }
 }
 
-fn render_preview_item(
-    item: PreviewItem,
-    on_directory_click: Option<Arc<dyn Fn(PreviewItem) + Send + Sync>>,
+fn render_detail_item(
+    item: DetailItem,
+    on_node_click: Option<Arc<dyn Fn(DetailItem) + Send + Sync>>,
 ) -> AnyView {
     if item.display_as_entry {
-        return render_listing_entry(item.clone(), on_directory_click);
+        return render_listing_entry(item.clone(), on_node_click);
     }
 
-    let PreviewItem {
+    let DetailItem {
         id: _,
         label,
         kind,
@@ -195,8 +195,8 @@ fn render_preview_item(
 }
 
 fn render_listing_entry(
-    item: PreviewItem,
-    on_directory_click: Option<Arc<dyn Fn(PreviewItem) + Send + Sync>>,
+    item: DetailItem,
+    on_node_click: Option<Arc<dyn Fn(DetailItem) + Send + Sync>>,
 ) -> AnyView {
     let kind = item.kind.clone();
     let label = item.label.clone();
@@ -238,7 +238,7 @@ fn render_listing_entry(
     };
 
     if matches!(kind, NodeKind::Directory) {
-        if let Some(callback) = on_directory_click {
+        if let Some(callback) = on_node_click {
             let item_clone = item.clone();
             return view! {
                 <div class="w-full min-w-0">
