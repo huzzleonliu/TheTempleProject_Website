@@ -11,35 +11,29 @@ The Temple Project 是一个以 Rust 为核心的全栈网站，目标是构建�
 - **部署**：Podman + podman-compose，Nginx 作为反向代理与静态资源分发。
 ## 部署方法
 使用podman-compose部署`podman-compose up -d `
+将文件资源拷贝进./resource/resource目录
+使用script/refresh_resources.sh装载数据
 通过43.131.27.176:8080访问网站
 
 ## 资源与数据库自动化
 为方便批量更新资源与目录节点，项目提供以下流程：
 
 1. **准备宿主目录**
-   - 将真实资源放在宿主机 `/resource/`，容器启动时会通过 bind mount 映射为资源服务的数据根。
+   - 将真实资源放在宿主机 `/resource/`，`docker-compose.yml` 会将其 bind mount 到 resource 容器的 `/resource`。
    - `database/import_exchange/` 用于 CSV 交换，可由脚本自动写入、数据库容器自动读取。
 
-2. **刷新资源 CSV**
+2. **一键刷新与导入**
    ```bash
-   ./scripts/refresh_resources.sh            # 默认扫描 /resource
-   ./scripts/refresh_resources.sh /path/to/data_root  # 可指定其它根目录
+   COMPOSE_CMD="podman-compose" ./scripts/refresh_resources.sh ./resource/resource
    ```
-   脚本会运行 `utils/node-generate-tool`，生成 `node.csv` 与 `visual_assets.csv` 到 `database/import_exchange/`。
+   - 未传参时默认扫描 `/resource`（适合容器内运行）；传参可指定其它目录。
+   - 脚本会调用 `utils/node-generate-tool` 生成 `node.csv`/`visual_assets.csv`，随后自动执行 `database/scripts/import_csv.sh`，在 `tp_database` 容器内通过 `psql` 完成 `TRUNCATE + \copy`。
 
-3. **导入数据库**
-   ```bash
-   ./database/scripts/import_csv.sh          # 依赖 docker compose exec database
-   ```
-   该脚本会：
-   - 检查交换目录中的 CSV；
-   - 通过 `docker compose exec database` 在容器内执行 `psql`；
-   - 建表（如不存在）、`TRUNCATE` 并使用 `\copy` 导入 `directory_nodes` / `file_nodes`。
-   可通过环境变量 `COMPOSE_CMD` 自定义 compose 命令（如 `podman-compose`）。
-
-4. **注意事项**
+3. **注意事项**
    - 确保 `/resource/` 与 `database/import_exchange/` 对当前用户可写。
-   - 导入脚本默认只处理 `node.csv` 与 `visual_assets.csv`，如需额外数据请自行扩展。
+   - 若使用 `docker-compose`，运行脚本时设置 `COMPOSE_CMD="docker-compose"`。
+   - resource 目录可为空，Nginx 仍会启动，但访问将返回 404。只需在上传资源后重新执行脚本即可。
+
 
 ## 前端导航逻辑
 前端采用“基于路径的结构驱动”方案，所有导航行为都依赖节点的完整路径进行推导：

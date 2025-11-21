@@ -15,14 +15,7 @@ ENV POSTGRES_DB=tp_db \
 # COPY ./restore.sh /docker-entrypoint-initdb.d/
 # RUN chmod +x /docker-entrypoint-initdb.d/restore.sh
 
-# 复制 dataFolder 和 CSV 导入脚本
-RUN mkdir -p /dataFolder
-COPY ./dataFolder/ /dataFolder/
-COPY ./import_csv.sh /docker-entrypoint-initdb.d/
-RUN chmod +x /docker-entrypoint-initdb.d/import_csv.sh
-
-# 设置数据卷（生产环境推荐）
-VOLUME /var/lib/postgresql
+# 数据初始内容在容器启动后通过脚本导入，无需在构建阶段复制 CSV
 
 # 暴露 5432 端口
 EXPOSE 5432
