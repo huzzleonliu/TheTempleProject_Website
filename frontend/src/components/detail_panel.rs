@@ -227,7 +227,7 @@ fn render_listing_entry(
 
     let inner = move || {
         view! {
-            <div class="w-full text-left truncate text-2xl px-2 py-2 rounded text-gray-400 bg-gray-900/40 border border-gray-800">
+            <div class="w-full text-left truncate text-2xl px-2 py-2 rounded text-gray-400 bg-gray-900/40 border border-gray-800 ">
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-gray-500">{badge}</span>
                     <span class="text-gray-100">{label.clone()}</span>
