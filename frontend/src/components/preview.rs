@@ -1,5 +1,6 @@
 use crate::{NodeKind, PreviewItem};
 use leptos::prelude::*;
+use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
 #[component]
@@ -8,6 +9,7 @@ pub fn Preview(
     loading: ReadSignal<bool>,
     error: ReadSignal<Option<String>>,
     scroll_container_ref: NodeRef<leptos::html::Div>,
+    #[prop(optional_no_strip)] on_directory_click: Option<Arc<dyn Fn(PreviewItem) + Send + Sync>>,
 ) -> impl IntoView {
     {
         let items = items.clone();
@@ -15,8 +17,7 @@ pub fn Preview(
         let error = error.clone();
         Effect::new(move |_| {
             let snapshot = items.get();
-            let serialized =
-                serde_json::to_string(&snapshot).unwrap_or_else(|_| "[]".to_string());
+            let serialized = serde_json::to_string(&snapshot).unwrap_or_else(|_| "[]".to_string());
             let loading_state = loading.get();
             let error_state = error.get();
             web_sys::console::log_4(
@@ -28,53 +29,81 @@ pub fn Preview(
         });
     }
 
+    enum RenderState {
+        Loading,
+        Error(String),
+        Empty,
+        Content,
+    }
+
     view! {
         <div
             node_ref=scroll_container_ref
             class="h-full overflow-y-auto overflow-x-hidden px-2"
         >
-            <Show
-                when=move || loading.get()
-                fallback=move || {
-                    view! {
-                        <Show
-                            when=move || error.get().is_some()
-                            fallback=move || {
-                                view! {
-                                    <Show
-                                        when=move || !items.get().is_empty()
-                                        fallback=move || view! { <div class="text-gray-500">"暂无内容"</div> }
-                                    >
-                                        <div class="space-y-3">
-                        <For
-                            each=move || items.get()
-                                key=|item| format!(
-                                    "{}:{}:{}",
-                                    item.id,
-                                    item.content.is_some() as u8,
-                                    item.display_as_entry as u8
-                                )
-                                                children=move |item: PreviewItem| {
-                                                    render_preview_item(item)
-                                                }
-                                            />
-                                        </div>
-                                    </Show>
-                                }
-                            }
-                        >
-                            <div class="text-red-500">{move || error.get().unwrap_or_else(|| "未知错误".to_string())}</div>
-                        </Show>
+            {move || {
+                let state = if loading.get() {
+                    RenderState::Loading
+                } else if let Some(err_msg) = error.get() {
+                    RenderState::Error(err_msg)
+                } else if items.with(|list| list.is_empty()) {
+                    RenderState::Empty
+                } else {
+                    RenderState::Content
+                };
+
+                let rendered: AnyView = match state {
+                    RenderState::Loading => {
+                        let message = "加载中...".to_string();
+                        view! { <div class="text-gray-500 py-4">{message}</div> }.into_any()
                     }
-                }
-            >
-                <div class="text-gray-500 py-4">"加载中..."</div>
-            </Show>
+                    RenderState::Error(err_msg) => {
+                        let message = err_msg;
+                        view! { <div class="text-red-500">{message}</div> }.into_any()
+                    }
+                    RenderState::Empty => {
+                        let message = "暂无内容".to_string();
+                        view! { <div class="text-gray-500">{message}</div> }.into_any()
+                    }
+                    RenderState::Content => {
+                        let on_directory_click = on_directory_click.clone();
+                        view! {
+                            <div class="space-y-3">
+                                <For
+                                    each=move || items.get()
+                                    key=|item| format!(
+                                        "{}:{}:{}",
+                                        item.id,
+                                        item.content.is_some() as u8,
+                                        item.display_as_entry as u8
+                                    )
+                                    children=move |item: PreviewItem| {
+                                        render_preview_item(
+                                            item,
+                                            on_directory_click.clone(),
+                                        )
+                                    }
+                                />
+                            </div>
+                        }
+                        .into_any()
+                    }
+                };
+
+                rendered
+            }}
         </div>
     }
 }
 
-fn render_preview_item(item: PreviewItem) -> AnyView {
+fn render_preview_item(
+    item: PreviewItem,
+    on_directory_click: Option<Arc<dyn Fn(PreviewItem) + Send + Sync>>,
+) -> AnyView {
+    if item.display_as_entry {
+        return render_listing_entry(item.clone(), on_directory_click);
+    }
+
     let PreviewItem {
         id: _,
         label,
@@ -83,12 +112,8 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
         raw_path,
         has_children,
         content,
-        display_as_entry,
+        display_as_entry: _,
     } = item;
-
-    if display_as_entry {
-        return render_listing_entry(kind, label, directory_path, raw_path, has_children);
-    }
 
     match kind {
         NodeKind::Directory => {
@@ -170,12 +195,15 @@ fn render_preview_item(item: PreviewItem) -> AnyView {
 }
 
 fn render_listing_entry(
-    kind: NodeKind,
-    label: String,
-    directory_path: Option<String>,
-    raw_path: Option<String>,
-    has_children: bool,
+    item: PreviewItem,
+    on_directory_click: Option<Arc<dyn Fn(PreviewItem) + Send + Sync>>,
 ) -> AnyView {
+    let kind = item.kind.clone();
+    let label = item.label.clone();
+    let directory_path = item.directory_path.clone();
+    let raw_path = item.raw_path.clone();
+    let has_children = item.has_children;
+
     let detail = directory_path
         .clone()
         .or(raw_path.clone())
@@ -197,15 +225,37 @@ fn render_listing_entry(
         NodeKind::Overview => "[Overview]",
     };
 
-    view! {
-        <div class="w-full min-w-0">
+    let inner = move || {
+        view! {
             <div class="w-full text-left truncate text-2xl px-2 py-2 rounded text-gray-400 bg-gray-900/40 border border-gray-800">
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-gray-500">{badge}</span>
                     <span class="text-gray-100">{label.clone()}</span>
                 </div>
-                <div class="text-xs text-gray-600 break-all mt-1">{detail}</div>
+                <div class="text-xs text-gray-600 break-all mt-1">{detail.clone()}</div>
             </div>
+        }
+    };
+
+    if matches!(kind, NodeKind::Directory) {
+        if let Some(callback) = on_directory_click {
+            let item_clone = item.clone();
+            return view! {
+                <div class="w-full min-w-0">
+                    <button class="w-full text-left" on:click=move |_| {
+                        callback(item_clone.clone());
+                    }>
+                        {inner()}
+                    </button>
+                </div>
+            }
+            .into_any();
+        }
+    }
+
+    view! {
+        <div class="w-full min-w-0">
+            {inner()}
         </div>
     }
     .into_any()

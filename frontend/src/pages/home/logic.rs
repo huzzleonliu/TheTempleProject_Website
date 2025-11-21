@@ -20,6 +20,7 @@ use crate::types::{
 };
 
 /// 封装 Home 页面所需的所有信号、派生数据与操作方法。
+#[derive(Clone)]
 pub struct HomeLogic {
     pub selected_index: RwSignal<Option<usize>>,
     pub preview_items: RwSignal<Vec<PreviewItem>>,
@@ -33,9 +34,13 @@ pub struct HomeLogic {
     pub select_index_callback: UnsyncCallback<usize>,
     pub enter_index_callback: UnsyncCallback<usize>,
     pub overview_a_select_callback: UnsyncCallback<Option<String>>,
+    pub mobile_navigate_callback: UnsyncCallback<Option<String>>,
+    pub go_back_callback: UnsyncCallback<()>,
 
     pub preview_scroll_ref: NodeRef<leptos::html::Div>,
     pub overview_b_scroll_ref: NodeRef<leptos::html::Div>,
+
+    pub current_path: RwSignal<Option<String>>,
 }
 
 impl HomeLogic {
@@ -324,18 +329,12 @@ impl HomeLogic {
                 let len = nodes.len();
                 let current_idx = selected_index_signal.get();
 
-                let first_directory = nodes
-                    .iter()
-                    .enumerate()
-                    .find(|(_, node)| matches!(node.kind, NodeKind::Directory))
-                    .map(|(idx, _)| idx);
-
                 let normalized_idx = if len == 0 {
                     None
                 } else {
                     match current_idx {
                         Some(idx) if idx < len => Some(idx),
-                        _ => first_directory.or_else(|| Some(0)),
+                        _ => Some(0),
                     }
                 };
 
@@ -498,8 +497,7 @@ impl HomeLogic {
                                 .with(|map| map.get(&path).cloned())
                                 .unwrap_or_default();
                             preview_error.set(None);
-                            preview_items
-                                .set(build_preview_items_for_path(&directories, &assets));
+                            preview_items.set(build_preview_items_for_path(&directories, &assets));
                         }
                         preview_loading.set(false);
                     });
@@ -541,12 +539,7 @@ impl HomeLogic {
 
                     current_path.set(None);
                     let nodes = current_nodes.get_untracked();
-                    let default_idx = nodes
-                        .iter()
-                        .enumerate()
-                        .find(|(_, node)| matches!(node.kind, NodeKind::Directory))
-                        .map(|(idx, _)| idx)
-                        .or_else(|| if nodes.is_empty() { None } else { Some(0) });
+                    let default_idx = if nodes.is_empty() { None } else { Some(0) };
 
                     selected_index.set(default_idx);
 
@@ -711,6 +704,20 @@ impl HomeLogic {
             })
         };
 
+        let mobile_navigate_callback = {
+            let navigate_to = navigate_to.clone();
+            UnsyncCallback::new(move |target: Option<String>| {
+                navigate_to(target.clone(), None);
+            })
+        };
+
+        let go_back_callback = {
+            let go_back = go_back.clone();
+            UnsyncCallback::new(move |()| {
+                go_back();
+            })
+        };
+
         HomeLogic {
             selected_index,
             preview_items,
@@ -722,8 +729,11 @@ impl HomeLogic {
             select_index_callback,
             enter_index_callback,
             overview_a_select_callback,
+            mobile_navigate_callback,
+            go_back_callback,
             preview_scroll_ref,
             overview_b_scroll_ref,
+            current_path,
         }
     }
 }
@@ -833,7 +843,7 @@ fn build_preview_items_for_path(
             raw_path: Some(asset.raw_path.clone()),
             has_children: false,
             content: None,
-            display_as_entry: true,
+            display_as_entry: false,
         })
         .collect();
     asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
@@ -874,7 +884,7 @@ fn preview_item_from_ui_node(node: &UiNode) -> PreviewItem {
         raw_path: node.raw_path.clone(),
         has_children: node.has_children,
         content: None,
-        display_as_entry: false,
+        display_as_entry: matches!(node.kind, NodeKind::Directory),
     }
 }
 
