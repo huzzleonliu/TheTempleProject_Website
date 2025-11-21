@@ -7,7 +7,7 @@ pub use logic::HomeLogic;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-const MOBILE_BREAKPOINT_PX: f64 = 900.0;
+const MOBILE_BREAKPOINT_PX: f64 = 1000.0;
 
 /// 页面入口：聚焦数据如何在三栏间流动，操作细节位于 `logic` 模块。
 #[component]

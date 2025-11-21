@@ -53,6 +53,7 @@ pub fn PresentColumn(
                         let is_directory = matches!(node.kind, NodeKind::Directory);
                         let node_clone = node.clone();
                         let idx_attr = idx.to_string();
+                        let selected_index_for_click = selected_index.clone();
 
                         view! {
                             <li class="w-full min-w-0" data-index=idx_attr.clone()>
@@ -66,10 +67,10 @@ pub fn PresentColumn(
                                         }
                                     }
                                     on:click=move |_event: MouseEvent| {
+                                        let already_selected =
+                                            selected_index_for_click.get_untracked() == Some(idx);
                                         on_select.run(idx);
-                                    }
-                                    on:dblclick=move |_event: MouseEvent| {
-                                        if is_directory {
+                                        if is_directory && already_selected {
                                             on_enter.run(idx);
                                         }
                                     }
