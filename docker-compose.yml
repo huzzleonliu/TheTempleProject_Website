@@ -48,6 +48,10 @@ services:
       - "5432"
     ports:
       - "5433:5432"  # 映射端口到宿主机
+    volumes:
+      - type: bind
+        source: ./database/import_exchange
+        target: /import_exchange  # CSV 交换目录
 
   resource:
     container_name: tp_resource  # 容器名称
@@ -61,7 +65,7 @@ services:
     volumes:
       - type: bind
         source: ./resource/resource
-        target: /resource  # 挂载资源服务目录
+        target: /resource  # 将宿主 /resource/ 直接映射进容器
 
   nginx:
     container_name: tp_nginx  # 容器名称
