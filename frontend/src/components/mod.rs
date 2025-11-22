@@ -5,3 +5,4 @@ pub mod mobile;
 pub mod overview_column;
 pub mod present_column;
 pub mod title;
+pub mod footer;

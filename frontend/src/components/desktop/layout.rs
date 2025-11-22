@@ -4,6 +4,7 @@ use crate::components::present_column::PresentColumn;
 use crate::components::title::Title;
 use crate::pages::home::HomeLogic;
 use crate::types::DetailItem;
+use crate::components::footer::Footer;
 use leptos::prelude::*;
 
 #[component]
@@ -75,6 +76,9 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
                         scroll_container_ref=detail_scroll_ref
                     />
                 </div>
+            </div>
+            <div class="px-4 pb-4 flex-shrink-0">
+                <Footer/>
             </div>
         </div>
     }
