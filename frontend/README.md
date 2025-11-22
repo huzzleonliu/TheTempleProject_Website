@@ -6,13 +6,14 @@
 - 数据由后端 Axum API 提供，前端使用基于路径的缓存减少重复请求。
 
 ## 组件结构
-| 组件 | 作用 | 说明 |
+| 模块 | 作用 | 说明 |
 | --- | --- | --- |
 | `pages::home::Home` | 页面入口 | 维护全局状态、处理 API 请求、注册键盘事件 |
-| `components::overview_column` | Overview 栏 | 展示当前层级的父节点，点击可回退并高亮目标节点 |
-| `components::present_column` | Present 栏 | 展示 `current_path` 的直接子节点，支持单击选中、双击进入 |
-| `components::detail_panel` | Detail 栏 | 根据选中节点加载子内容或文件详情，支持 Markdown / PDF / 媒体 |
-| `components::keyboard_handlers` | 键盘适配层 | 将 `h/j/k/l`、`Shift+J/K` 等快捷键映射到导航/滚动逻辑 |
+| `pages::home::desktop_layout` / `mobile_layout` | 页面布局 | 负责三栏桌面布局与移动端单栏布局的整体排版与滚动容器 |
+| `components::header` | Header 组件 | `Header`（桌面端标题）与 `MobileHeader`（带返回按钮的移动端头部）统一维护 |
+| `components::body::{overview,present,detail}` | 主体三栏 | `OverviewColumn`、`PresentColumn`、`DetailPanel` 以及移动端 `Detail` 包含在 `body` 子模块中 |
+| `components::footer` | Footer 组件 | 展示操作提示，插入在桌面/移动布局底部（移动端可选） |
+| `utils::{api,keyboard}` | 功能工具 | `api` 负责 HTTP 请求，`keyboard` 统一处理键盘导航；同目录还包含 `types`、`mouse` 等工具 |
 
 ## 状态与缓存
 - `path_cache: RwSignal<HashMap<String, Vec<DirectoryNode>>>`
@@ -38,12 +39,13 @@
    - `j / k`：在当前层级内移动选中行。
    - `l`：进入当前选中节点（若存在子节点）。
    - `h`：回退到父级目录，并保持原节点高亮。
-   - `Shift + J / K`：在 Preview 中滚动。
+   - `Shift + J / K`：在 Detail 栏中滚动。
 4. **根层级体验**：当处于根层级时，Overview 栏会展示一个虚拟的 `/` 节点，帮助用户理解层级起点。
 
 ## API 交互
-- `api::get_root_directories()`：获取根节点列表。
-- `api::get_child_directories(path)`：获取指定路径的直接子节点。
+- `utils::api::get_root_directories()`：获取根节点列表。
+- `utils::api::get_child_directories(path)`：获取指定路径的直接子节点。
+- `utils::api::get_node_assets(path)`：获取 `visual_assets` 下的文件信息。
 - `ensure_children(path)`：缓存薄层包装，判断是否需要真正发起请求。
 - `ensure_path_and_ancestors(path)`：预加载路径及其祖先层级，保障回退和面包屑能即时展示。
 

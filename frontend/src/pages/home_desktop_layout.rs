@@ -1,10 +1,8 @@
-use crate::components::detail_panel::DetailPanel;
-use crate::components::overview_column::OverviewColumn;
-use crate::components::present_column::PresentColumn;
-use crate::components::title::Title;
-use crate::pages::home::HomeLogic;
-use crate::types::DetailItem;
+use super::HomeLogic;
+use crate::components::body::{DetailPanel, OverviewColumn, PresentColumn};
 use crate::components::footer::Footer;
+use crate::components::header::Header;
+use crate::utils::types::DetailItem;
 use leptos::prelude::*;
 
 #[component]
@@ -49,7 +47,7 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
     view! {
         <div class="flex flex-col h-screen">
             <div class="px-4 pt-4 pb-0 flex-shrink-0">
-                <Title/>
+                <Header/>
             </div>
             <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden items-start">
                 <div class="col-span-2 overflow-y-auto px-4 pt-0">

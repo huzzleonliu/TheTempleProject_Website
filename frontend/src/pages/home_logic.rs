@@ -12,9 +12,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
-use crate::api::{get_child_directories, get_node_assets, get_root_directories};
-use crate::components::keyboard_handlers;
-use crate::types::{
+use crate::utils::api::{get_child_directories, get_node_assets, get_root_directories};
+use crate::utils::keyboard;
+use crate::utils::types::{
     parent_path, split_levels, AssetNode, AssetsCache, DetailItem, DirectoryNode, NodeKind,
     NodesCache, UiNode, ROOT_PATH,
 };
@@ -601,7 +601,7 @@ impl HomeLogic {
                             }
                         }
 
-                        keyboard_handlers::handle_keyboard_navigation(
+                        keyboard::handle_keyboard_navigation(
                             &event,
                             move_selection.clone(),
                             enter_selection.clone(),

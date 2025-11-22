@@ -1,6 +1,6 @@
 use gloo_net::http::Request;
 
-use crate::types::{AssetNode, AssetsResponse, DirectoriesResponse, DirectoryNode};
+use crate::utils::types::{AssetNode, AssetsResponse, DirectoriesResponse, DirectoryNode};
 
 /// 获取根目录列表
 pub async fn get_root_directories() -> Result<Vec<DirectoryNode>, String> {

@@ -2,17 +2,18 @@
 
 ## 项目简介
 The Temple Project 是一个以 Rust 为核心的全栈网站，目标是构建个人创作与知识库的统一入口。
-项目分为前端、后端、数据库与静态资源服务四个部分，通过容器化方式部署，支持后续的长期扩展与维护。
+项目分为nginx网关、前端、后端、数据库与静态资源服务四个部分，通过容器化方式部署，支持后续的长期扩展与维护。
 
 ## 技术栈总览
-- **前端**：Leptos 0.8 + WebAssembly，三栏式导航界面，支持键盘快捷键与目录缓存。
+- **前端**：Leptos + WebAssembly，三栏式导航界面，支持键盘快捷键与目录缓存。
 - **后端**：Axum + Tokio，提供目录结构 API。
 - **数据库**：PostgreSQL（启用 `ltree` 扩展）存储目录层级信息。
-- **部署**：Podman + podman-compose，Nginx 作为反向代理与静态资源分发。
+- **资源库**：使用Nginx管理资源的访问。
+- **网关**：Nginx 作为反向代理与静态资源分发。
 ## 部署方法
 使用podman-compose部署`podman-compose up -d `
 将文件资源拷贝进./resource/resource目录
-使用script/refresh_resources.sh装载数据
+使用utils/refresh_resources.sh装载数据
 通过43.131.27.176:8080访问网站
 
 ## 资源与数据库自动化
@@ -37,19 +38,19 @@ The Temple Project 是一个以 Rust 为核心的全栈网站，目标是构建�
 
 ## 前端导航逻辑
 前端采用“基于路径的结构驱动”方案，所有导航行为都依赖节点的完整路径进行推导：
-1. `OverviewB` 展示当前路径的直接子节点；
-2. `OverviewA` 展示当前节点所在父层级，并高亮当前节点；
-3. `Preview` 根据 `OverviewB` 的选中项异步加载更深一层的内容；
+1. `PresentColumn` 展示当前路径的直接子节点；
+2. `OverviewColumn` 展示当前节点所在父层级，并高亮当前节点；
+3. `DetailPanel` 根据 `PresentColumn` 的选中项异步加载更深一层的内容；
 4. 所有鼠标和键盘操作汇聚到 `navigate_to(target_path, preferred_index)`，统一管理缓存、选中项和预览更新；
 5. 根层级会插入一个虚拟的 `/` 节点，帮助用户理解层级起点。
 
 ### 快捷键速览
 | 快捷键 | 功能 |
 | --- | --- |
-| `j / k` | 在 `OverviewB` 中上下移动选中行 |
+| `j / k` | 在 `PresentColumn` 中上下移动选中行 |
 | `l` | 进入当前选中节点（若存在子节点） |
 | `h` | 回退到父级目录，并高亮原节点 |
-| `Shift + J / Shift + K` | 在 `Preview` 中滚动 |
+| `Shift + J / Shift + K` | 在 `DetailPanel` 中滚动 |
 
 ## 项目计划
 第一阶段这个项目预计将包含以下几个功能：
@@ -84,7 +85,7 @@ TheTempleProject_Website/
 ├── frontend/                # Leptos 前端
 │   ├── src/
 │   │   ├── pages/home.rs    # 三栏页面核心逻辑
-│   │   ├── components/      # UI 组件（OverviewA/B、Preview、键盘适配等）
+│   │   ├── components/      # UI 组件（Header、Body: Overview/Present/Detail、Footer 等）
 │   │   └── api.rs           # 前端 API 调用封装
 │   └── README.md            # 前端功能说明
 ├── backend/                 #（预留）Axum 服务

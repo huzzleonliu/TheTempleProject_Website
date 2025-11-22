@@ -1,8 +1,20 @@
-use crate::types::parent_path;
+use crate::utils::types::parent_path;
 use leptos::prelude::*;
 
 const ROOT_LABEL: &str = "/";
 
+// ---------------- Desktop Header ----------------
+#[component]
+pub fn Header() -> impl IntoView {
+    view! {
+        <header class="flex flex-col gap-2">
+            <h1 class="text-4xl font-semibold">"The Temple Project"</h1>
+            <p class="text-sm text-gray-500">"使用 hjkl 导航，Shift + J/K 翻页"</p>
+        </header>
+    }
+}
+
+// ---------------- Mobile Header ----------------
 #[component]
 pub fn MobileHeader(
     current_path: RwSignal<Option<String>>,
@@ -42,10 +54,7 @@ pub fn MobileHeader(
 
 fn format_segments(path: Option<String>) -> Vec<String> {
     match path {
-        Some(p) if !p.is_empty() => p
-            .split('.')
-            .map(|segment| truncate_segment(segment))
-            .collect(),
+        Some(p) if !p.is_empty() => p.split('.').map(truncate_segment).collect(),
         _ => vec![ROOT_LABEL.to_string()],
     }
 }

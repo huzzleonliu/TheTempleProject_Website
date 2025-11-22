@@ -581,19 +581,9 @@
     --tw-outline-style: none;
     outline-style: none;
   }
-  .focus-within\:bg-gray-600 {
-    &:focus-within {
-      background-color: var(--color-gray-600);
-    }
-  }
   .focus-within\:bg-gray-700 {
     &:focus-within {
       background-color: var(--color-gray-700);
-    }
-  }
-  .focus-within\:text-white {
-    &:focus-within {
-      color: var(--color-white);
     }
   }
   .hover\:bg-gray-800 {
@@ -608,11 +598,6 @@
       @media (hover: hover) {
         color: var(--color-white);
       }
-    }
-  }
-  .active\:bg-gray-400 {
-    &:active {
-      background-color: var(--color-gray-400);
     }
   }
   .disabled\:cursor-not-allowed {

@@ -1,9 +1,14 @@
+#[path = "home_desktop_layout.rs"]
+mod desktop_layout;
+#[path = "home_logic.rs"]
 pub mod logic;
+#[path = "home_mobile_layout.rs"]
+mod mobile_layout;
 
-use crate::components::desktop::DesktopLayout;
-use crate::components::mobile::MobileNavigator;
+use desktop_layout::DesktopLayout;
 use leptos::prelude::*;
 pub use logic::HomeLogic;
+use mobile_layout::MobileNavigator;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 

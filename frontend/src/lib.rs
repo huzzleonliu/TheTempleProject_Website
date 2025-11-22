@@ -1,10 +1,9 @@
-mod api;
 pub mod app;
 mod components;
 mod pages;
-mod types;
+pub mod utils;
 
-pub use types::{
+pub use utils::types::{
     AssetNode, AssetsCache, AssetsResponse, DetailItem, DirectoriesResponse, DirectoryNode,
     NodeKind, NodesCache, UiNode, ROOT_PATH,
 };

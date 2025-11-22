@@ -1,8 +1,11 @@
+use crate::pages::home::HomeLogic;
 use crate::{DetailItem, NodeKind};
+use leptos::callback::Callback;
 use leptos::prelude::*;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
+// ---------------- Shared Detail Panel ----------------
 #[component]
 pub fn DetailPanel(
     items: ReadSignal<Vec<DetailItem>>,
@@ -58,8 +61,7 @@ pub fn DetailPanel(
                         view! { <div class="text-gray-500 py-4">{message}</div> }.into_any()
                     }
                     RenderState::Error(err_msg) => {
-                        let message = err_msg;
-                        view! { <div class="text-red-500">{message}</div> }.into_any()
+                        view! { <div class="text-red-500">{err_msg}</div> }.into_any()
                     }
                     RenderState::Empty => {
                         let message = "暂无内容".to_string();
@@ -272,5 +274,39 @@ fn asset_to_url(raw_path: &str) -> String {
             .unwrap_or_else(|| "".to_string());
         let base = origin.trim_end_matches('/');
         format!("{}/resource/{}", base, trimmed)
+    }
+}
+
+// ---------------- Mobile Detail Wrapper ----------------
+#[component]
+pub fn Detail(logic: HomeLogic, on_node_click: Callback<Option<String>>) -> impl IntoView {
+    let detail_items = logic.detail_items.read_only();
+    let detail_loading = logic.detail_loading.read_only();
+    let detail_error = logic.detail_error.read_only();
+    let detail_scroll_ref = logic.detail_scroll_ref.clone();
+    let pane_key = Memo::new({
+        let current_path = logic.current_path.clone();
+        move |_| current_path.get().unwrap_or_else(|| "root".to_string())
+    });
+
+    let detail_callback: Arc<dyn Fn(DetailItem) + Send + Sync> = {
+        let handler = on_node_click.clone();
+        Arc::new(move |item: DetailItem| {
+            handler.run(item.directory_path.clone());
+        })
+    };
+
+    view! {
+        <div class=move || format!("absolute inset-0 flex flex-col gap-4 p-4 pane-{}", pane_key.get())>
+            <div class="border border-gray-800 rounded-xl overflow-hidden flex-1">
+                <DetailPanel
+                    items=detail_items
+                    loading=detail_loading
+                    error=detail_error
+                    scroll_container_ref=detail_scroll_ref
+                    on_node_click=Some(detail_callback.clone())
+                />
+            </div>
+        </div>
     }
 }

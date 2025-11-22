@@ -1,7 +1,8 @@
-use super::{detail_pane::DetailPane, header::MobileHeader};
-use crate::pages::home::HomeLogic;
+use super::HomeLogic;
+use crate::components::body::Detail;
+use crate::components::header::MobileHeader;
+use leptos::callback::Callback;
 use leptos::prelude::*;
-use crate::components::footer::Footer;
 
 #[component]
 pub fn MobileNavigator(logic: HomeLogic) -> impl IntoView {
@@ -28,7 +29,7 @@ pub fn MobileNavigator(logic: HomeLogic) -> impl IntoView {
             <div class="flex flex-col w-full min-h-[100dvh]">
                 <MobileHeader current_path=logic.current_path.clone() set_pending_path=set_pending_path.clone() />
                 <div class="relative flex-1 min-h-0 overflow-hidden">
-                    <DetailPane
+                    <Detail
                         logic=logic.clone()
                         on_node_click=Callback::new({
                             let set_pending_path = set_pending_path.clone();

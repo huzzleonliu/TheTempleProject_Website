@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TOOL_DIR="${REPO_ROOT}/utils/node-generate-tool"
 DEFAULT_RESOURCE_ROOT="${REPO_ROOT}/resource/resource"
 RESOURCE_ROOT="${1:-${DEFAULT_RESOURCE_ROOT}}"
