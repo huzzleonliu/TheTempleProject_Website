@@ -9,8 +9,11 @@ use desktop_layout::DesktopLayout;
 use leptos::prelude::*;
 pub use logic::HomeLogic;
 use mobile_layout::MobileNavigator;
+use urlencoding::decode;
+use urlencoding::encode;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
 
 const MOBILE_BREAKPOINT_PX: f64 = 1200.0;
 
@@ -27,6 +30,24 @@ pub fn Home() -> impl IntoView {
         let is_mobile_flag = is_mobile.clone();
         Effect::new(move |_| {
             keyboard_enabled.set(!is_mobile_flag.get());
+        });
+    }
+
+    {
+        let logic_for_url = logic.clone();
+        Effect::new(move |_| {
+            if let Some(initial_path) = read_path_from_url() {
+                logic_for_url
+                    .mobile_navigate_callback
+                    .run(Some(initial_path));
+            }
+        });
+    }
+
+    {
+        let current_path = logic.current_path.clone();
+        Effect::new(move |_| {
+            sync_url_with_path(current_path.get());
         });
     }
 
@@ -69,4 +90,55 @@ fn is_mobile_viewport(threshold: f64) -> bool {
         .and_then(|v| v.as_f64())
         .map(|width| width <= threshold)
         .unwrap_or(false)
+}
+
+fn read_path_from_url() -> Option<String> {
+    let window = web_sys::window()?;
+    let location = window.location();
+    let search = location.search().ok()?;
+    if search.len() <= 1 {
+        return None;
+    }
+    search[1..]
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next()?;
+            let value = parts.next().unwrap_or_default();
+            if key == "path" {
+                decode(value).ok().map(|cow| cow.into_owned())
+            } else {
+                None
+            }
+        })
+        .find(|path| !path.is_empty())
+}
+
+fn sync_url_with_path(path: Option<String>) {
+    let window = match web_sys::window() {
+        Some(win) => win,
+        None => return,
+    };
+
+    let mut base = match window.location().origin() {
+        Ok(origin) => origin,
+        Err(_) => return,
+    };
+
+    match window.location().pathname() {
+        Ok(pathname) => base.push_str(&pathname),
+        Err(_) => base.push('/'),
+    }
+
+    let mut final_url = base;
+    if let Some(path_value) = path {
+        if !path_value.is_empty() {
+            final_url.push_str("?path=");
+            final_url.push_str(&encode(&path_value));
+        }
+    }
+
+    if let Ok(history) = window.history() {
+        let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&final_url));
+    }
 }
