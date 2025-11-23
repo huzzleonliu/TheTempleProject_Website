@@ -2,10 +2,11 @@
 
 ## 工具说明
 
-这是一个用于为网站数据库生成“目录节点表”和“资源文件表”的命令行工具。工具包含两种模式：
-- 节点扫描（默认或 --node）：扫描目录节点，输出节点属性 CSV
-- 资源扫描（--visual-scan）：扫描各节点中的 visual_assets/ 下的“直接文件”，输出文件路径 CSV（不递归子目录）
-两种 CSV 均可直接导入 PostgreSQL（推荐使用 ltree 扩展）。
+这是一个用于为网站数据库生成“目录节点表”和“资源文件表”的命令行工具。工具包含三种模式：
+- 节点扫描（默认或 `--node`）：扫描目录节点，输出节点属性 CSV
+- 资源扫描（`--visual-scan`）：扫描各节点中的 `visual_assets/` 下的“直接文件”，输出文件路径 CSV（不递归子目录）
+- 资源复制（`--copy-visual`）：复制所有匹配的 `visual_assets/` 目录到指定位置，保持原有目录层级
+两种 CSV 输出可直接导入 PostgreSQL（推荐使用 ltree 扩展），复制模式可同步静态资源到外部目录。
 
 ## 与前端布局的对齐
 - 前端已经统一为 Overview / Present / Detail 三栏，所有层级实体在 UI 中都称为 `node`。
@@ -20,7 +21,7 @@
   1. 程序源码目录（`utils/node-generate-tool/`）
   2. 可执行程序所在目录（`target/release/`）
   3. 被扫描的根目录
-- 在“资源扫描模式”（`--visual-scan`）下，工具会附加“反忽略”规则强制包含 `visual_assets/`（覆盖 fileignore 中的忽略），确保可以正确扫描。
+- 在资源相关模式（`--visual-scan`、`--copy-visual`）下，工具会附加“反忽略”规则强制包含 `visual_assets/`（覆盖 `fileignore` 中的忽略），确保可以正确扫描或复制。
 
 ### 2. 节点扫描（--node 或默认）
 - 递归扫描指定根目录下的所有子目录（仅目录）
@@ -53,6 +54,12 @@
 - 默认输出文件名：`visual_assets.csv`
 - 文件路径会按 ltree 规则清洗（非字母/数字/下划线将替换为 `_`；点号也会被替换为 `_`）
 
+### 4. 资源复制（--copy-visual）
+- 遍历过程中遇到 `visual_assets/` 目录时，将其整体复制到目标目录
+- 默认目标目录为 `~/Desktop`，可通过 `-o`/`--output` 指定其他路径（支持 `~` 展开，相对路径会基于当前工作目录）
+- 复制结果保留相对于根目录的层级结构，例如 `project/sub/visual_assets` 将复制为 `<output>/project/sub/visual_assets`
+- 同样遵循合并后的 `fileignore` 规则，被忽略的节点不会被复制
+
 ## 使用方法
 
 ### 编译
@@ -77,6 +84,11 @@ cargo build --release
 ./target/release/node-generate-tool /path/to/data/root --visual-scan
 ./target/release/node-generate-tool /path/to/data/root --visual-scan -o images.csv
 
+# 3) 资源复制（复制 visual_assets 目录）
+# 默认复制到 ~/Desktop，可通过 -o 指定
+./target/release/node-generate-tool /path/to/data/root --copy-visual
+./target/release/node-generate-tool /path/to/data/root --copy-visual -o /path/to/output
+
 # 指定忽略文件名（默认 fileignore）
 ./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
 ```
@@ -87,6 +99,7 @@ cargo build --release
 2. **运行工具**:
    - 节点扫描：生成最新的节点表 CSV（`node.csv` 或自定义名称）
    - 资源扫描：生成最新的资源文件表 CSV（`visual_assets.csv` 或自定义名称）
+   - 资源复制：将最新的 `visual_assets/` 目录同步到目标目录，用于打包或交付
 3. **导入数据库**: 将生成的 CSV 文件导入 PostgreSQL，替换旧的数据
 4. **后端查询**: 后端根据“节点表”和“资源文件表”进行高效检索与渲染
 
@@ -258,6 +271,7 @@ node_modules/
 
 - 节点扫描：只扫描目录，不扫描文件
 - 资源扫描：只扫描各节点的 `visual_assets/` 目录下的“直接文件”（不递归子目录）
+- 资源复制：仅复制 `visual_assets/` 目录及其内部文件，目标目录中同名文件会被覆盖
 - 路径使用点号分隔（ltree），便于在数据库中存储和查询
 - 布尔值输出为 `true`/`false`，PostgreSQL 可直接识别
 - 图片文件支持常见格式：jpg, jpeg, png, gif, webp, svg, bmp, ico
