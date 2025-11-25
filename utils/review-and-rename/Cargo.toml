@@ -1,0 +1,13 @@
+[package]
+name = "weave_tool_egui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.33"
+egui = "0.33"
+image = "0.25"
+rfd = "0.14"
+egui_dnd = "0.14"
+pdf-extract = "0.10"
+docx-lite = "0.2"
