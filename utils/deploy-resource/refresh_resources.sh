@@ -20,10 +20,10 @@ mkdir -p "${OUTPUT_DIR}"
 pushd "${TOOL_DIR}" >/dev/null
 
 echo "[资源扫描] 生成 node.csv ..."
-cargo run --release -- "${RESOURCE_ROOT}" --node -o "${OUTPUT_DIR}/node.csv"
+cargo run --release -- scan node "${RESOURCE_ROOT}" -o "${OUTPUT_DIR}/node.csv"
 
 echo "[资源扫描] 生成 visual_assets.csv ..."
-cargo run --release -- "${RESOURCE_ROOT}" --visual-scan -o "${OUTPUT_DIR}/visual_assets.csv"
+cargo run --release -- scan visual "${RESOURCE_ROOT}" -o "${OUTPUT_DIR}/visual_assets.csv"
 
 popd >/dev/null
 

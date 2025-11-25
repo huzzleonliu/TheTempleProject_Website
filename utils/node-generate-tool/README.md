@@ -2,10 +2,10 @@
 
 ## 工具说明
 
-这是一个用于为网站数据库生成“目录节点表”和“资源文件表”的命令行工具。工具包含三种模式：
-- 节点扫描（默认或 `--node`）：扫描目录节点，输出节点属性 CSV
-- 资源扫描（`--visual-scan`）：扫描各节点中的 `visual_assets/` 下的“直接文件”，输出文件路径 CSV（不递归子目录）
-- 资源复制（`--copy-visual`）：复制所有匹配的 `visual_assets/` 目录到指定位置，保持原有目录层级
+这是一个用于为网站数据库生成“目录节点表”和“资源文件表”的命令行工具。命令分为“动作 + 类型”两层结构：
+- `scan node`：扫描目录节点，输出节点属性 CSV
+- `scan visual`：扫描各节点中的 `visual_assets/` 下的“直接文件”，输出文件路径 CSV（不递归子目录）
+- `copy visual`：复制所有匹配的 `visual_assets/` 目录到指定位置，保持原有目录层级（未来可扩展其它类型）
 两种 CSV 输出可直接导入 PostgreSQL（推荐使用 ltree 扩展），复制模式可同步静态资源到外部目录。
 
 ## 与前端布局的对齐
@@ -21,9 +21,9 @@
   1. 程序源码目录（`utils/node-generate-tool/`）
   2. 可执行程序所在目录（`target/release/`）
   3. 被扫描的根目录
-- 在资源相关模式（`--visual-scan`、`--copy-visual`）下，工具会附加“反忽略”规则强制包含 `visual_assets/`（覆盖 `fileignore` 中的忽略），确保可以正确扫描或复制。
+- 在资源相关模式（`scan visual`、`copy visual`）下，工具会附加“反忽略”规则强制包含 `visual_assets/`（覆盖 `fileignore` 中的忽略），确保可以正确扫描或复制。
 
-### 2. 节点扫描（--node 或默认）
+### 2. 节点扫描（`scan node`）
 - 递归扫描指定根目录下的所有子目录（仅目录）
 - 采用上述忽略策略过滤
 
@@ -47,14 +47,14 @@
 
 **注意：** 路径使用 ltree 格式（点号分隔），目录名中的特殊字符会被替换为下划线，以符合 ltree 标签要求（只能包含字母、数字、下划线）。
 
-### 3. 资源扫描（--visual-scan）
+### 3. 资源扫描（`scan visual`）
 - 当遇到任意节点下的 `visual_assets/` 目录时，列出该目录内的“直接文件”（不递归子目录）
 - 每个文件以“相对于根”的路径，转换为 ltree 形式输出为一行
 - CSV 列：`file_path`
 - 默认输出文件名：`visual_assets.csv`
 - 文件路径会按 ltree 规则清洗（非字母/数字/下划线将替换为 `_`；点号也会被替换为 `_`）
 
-### 4. 资源复制（--copy-visual）
+### 4. 资源复制（`copy visual`）
 - 遍历过程中遇到 `visual_assets/` 目录时，将其整体复制到目标目录
 - 默认目标目录为 `~/Desktop`，可通过 `-o`/`--output` 指定其他路径（支持 `~` 展开，相对路径会基于当前工作目录）
 - 复制结果保留相对于根目录的层级结构，例如 `project/sub/visual_assets` 将复制为 `<output>/project/sub/visual_assets`
@@ -70,27 +70,20 @@ cargo build --release
 
 ### 基本用法
 ```bash
-# 1) 节点扫描（默认即节点扫描，或显式指定 --node）
-# 默认输出 node.csv（可通过 -o 指定）
-./target/release/node-generate-tool /path/to/data/root
-./target/release/node-generate-tool /path/to/data/root --node
-./target/release/node-generate-tool /path/to/data/root --node -o nodes.csv
+# 1) 节点扫描（默认输出 node.csv，可通过 -o 指定）
+./target/release/node-generate-tool scan node /path/to/data/root
+./target/release/node-generate-tool scan node /path/to/data/root -o nodes.csv
 
-# 指定输出文件
-./target/release/node-generate-tool /path/to/data/root -o nodes.csv
+# 2) 资源扫描（扫描 visual_assets/ 的直接文件，默认输出 visual_assets.csv）
+./target/release/node-generate-tool scan visual /path/to/data/root
+./target/release/node-generate-tool scan visual /path/to/data/root -o images.csv
 
-# 2) 资源扫描（扫描 visual_assets/ 的直接文件）
-# 默认输出 visual_assets.csv（可通过 -o 指定）
-./target/release/node-generate-tool /path/to/data/root --visual-scan
-./target/release/node-generate-tool /path/to/data/root --visual-scan -o images.csv
-
-# 3) 资源复制（复制 visual_assets 目录）
-# 默认复制到 ~/Desktop，可通过 -o 指定
-./target/release/node-generate-tool /path/to/data/root --copy-visual
-./target/release/node-generate-tool /path/to/data/root --copy-visual -o /path/to/output
+# 3) 资源复制（复制 visual_assets 目录，默认复制到 ~/Desktop）
+./target/release/node-generate-tool copy visual /path/to/data/root
+./target/release/node-generate-tool copy visual /path/to/data/root -o /path/to/output
 
 # 指定忽略文件名（默认 fileignore）
-./target/release/node-generate-tool /path/to/data/root --ignore-file custom.ignore
+./target/release/node-generate-tool scan node /path/to/data/root --ignore-file custom.ignore
 ```
 
 ## 工作流程
