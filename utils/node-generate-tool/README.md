@@ -59,6 +59,7 @@
 - 默认目标目录为 `~/Desktop`，可通过 `-o`/`--output` 指定其他路径（支持 `~` 展开，相对路径会基于当前工作目录）
 - 复制结果保留相对于根目录的层级结构，例如 `project/sub/visual_assets` 将复制为 `<output>/project/sub/visual_assets`
 - 同样遵循合并后的 `fileignore` 规则，被忽略的节点不会被复制
+- 复制完成后，会在目标目录生成合并后的 `fileignore`（同名文件），便于下游沿用相同的过滤规则（不包含 `visual_assets` 的强制纳入条目）
 
 ## 使用方法
 

@@ -19,7 +19,7 @@ pub fn build_walker(
     root: &Path,
     ignore_file: &str,
     include_visual: bool,
-) -> Result<(Walk, Option<PathBuf>)> {
+) -> Result<(Walk, Option<PathBuf>, Option<String>)> {
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -64,6 +64,12 @@ pub fn build_walker(
         eprintln!("共加载 {} 个 ignore 文件", loaded_count);
     }
 
+    let base_rules = if merged_rules.trim().is_empty() {
+        None
+    } else {
+        Some(merged_rules.clone())
+    };
+
     if include_visual {
         merged_rules.push_str("\n# visual modes: force include visual_assets\n");
         merged_rules.push_str("!visual_assets/\n");
@@ -82,7 +88,7 @@ pub fn build_walker(
         None
     };
 
-    Ok((builder.build(), temp_ignore_path))
+    Ok((builder.build(), temp_ignore_path, base_rules))
 }
 
 pub fn cleanup_temp_ignore(temp_path: Option<PathBuf>) {

@@ -17,7 +17,7 @@ pub fn run_node_scan(root: &Path, output_path: &Path, ignore_file: &str) -> Resu
     writeln!(writer, "path,has_subnodes,raw_path,raw_filename")
         .with_context(|| "写入 CSV 表头失败")?;
 
-    let (walker, temp_ignore_path) = build_walker(root, ignore_file, false)?;
+    let (walker, temp_ignore_path, _) = build_walker(root, ignore_file, false)?;
     let result: Result<()> = (|| {
         for dent in walker {
             let dent = match dent {
