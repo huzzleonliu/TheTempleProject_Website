@@ -11,7 +11,7 @@ backend/target/
 target/
 # dist/
 # resource documents
-resource/resource
+resource/resource/
 
 # database documents
 database/import_exchange/*.csv
