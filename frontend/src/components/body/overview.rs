@@ -12,7 +12,7 @@ pub fn OverviewColumn(
     #[prop(into)] on_select: UnsyncCallback<Option<String>>,
 ) -> impl IntoView {
     view! {
-        <ul class="flex flex-col gap-1 py-1">
+        <ul class="h-full overflow-y-auto flex flex-col gap-1 py-1">
             <For
                 each=move || nodes.get().into_iter()
                 key=|node| node.id.clone()

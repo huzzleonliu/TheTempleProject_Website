@@ -3,8 +3,8 @@ pub mod keyboard;
 pub mod mouse;
 pub mod types;
 pub mod lang;
-pub mod buttonClassBuilder;
+pub mod button_class_builder;
 
 pub use api::*;
 pub use types::*;
-pub use buttonClassBuilder::*;
+pub use button_class_builder::*;
