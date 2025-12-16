@@ -2,6 +2,7 @@ use leptos::callback::{Callable, UnsyncCallback};
 use leptos::prelude::*;
 
 use crate::{NodeKind, UiNode};
+use crate::utils::button_class_builder;
 
 /// Overview 栏：展示“当前位置的父级层级”列表，帮助用户在层级间快速回退。
 #[component]
@@ -11,7 +12,7 @@ pub fn OverviewColumn(
     #[prop(into)] on_select: UnsyncCallback<Option<String>>,
 ) -> impl IntoView {
     view! {
-        <ul class="text-2xl text-gray-500 flex flex-col gap-1">
+        <ul class="flex flex-col gap-1 py-1">
             <For
                 each=move || nodes.get().into_iter()
                 key=|node| node.id.clone()
@@ -30,18 +31,7 @@ pub fn OverviewColumn(
                         <li class="w-full min-w-0">
                             <button
                                 class=move || {
-                                    let base = "w-full h-full text-left truncate text-2xl px-2 py-1 rounded";
-                                    let is_selected = highlight_signal
-                                        .get()
-                                        .as_ref()
-                                        .map(|selected| selected == &node_id)
-                                        .unwrap_or(false);
-
-                                    if is_selected {
-                                        format!("{base} text-white bg-gray-800")
-                                    } else {
-                                        format!("{base} text-gray-400 hover:text-white hover:bg-gray-800 focus-within:bg-gray-700")
-                                    }
+                                    button_class_builder(&node, false)
                                 }
                                 on:click=move |_| {
                                     if matches!(node_clone.kind, NodeKind::Directory) {
@@ -53,7 +43,7 @@ pub fn OverviewColumn(
                                 }
                             >
                                 {label}
-                                <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
+                                // <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
                             </button>
                         </li>
                     }

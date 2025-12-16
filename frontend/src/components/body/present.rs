@@ -3,6 +3,7 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use wasm_bindgen::JsValue;
 
+use crate::utils::button_class_builder;
 use crate::{NodeKind, UiNode};
 
 fn log_present_state(nodes: &[UiNode], selected: Option<usize>) {
@@ -35,7 +36,7 @@ pub fn PresentColumn(
 
     view! {
         <div class="h-full overflow-y-auto pr-1" node_ref=container_ref.clone()>
-            <ul class="text-2xl text-gray-500 outline-none space-y-1">
+            <ul class="flex flex-col gap-1 py-1">
                 <For
                     each=move || nodes.get().into_iter().enumerate()
                     key=|(idx, node)| format!("{}:{}", idx, node.id)
@@ -59,12 +60,7 @@ pub fn PresentColumn(
                             <li class="w-full min-w-0" data-index=idx_attr.clone()>
                                 <button
                                     class=move || {
-                                        let base = "w-full h-full text-left truncate text-2xl px-2 py-2 rounded";
-                                        if is_selected.get() {
-                                            format!("{base} text-white bg-gray-800")
-                                        } else {
-                                            format!("{base} text-gray-400 hover:text-white hover:bg-gray-800 focus-within:bg-gray-700")
-                                        }
+                                        button_class_builder(&node, is_selected.get())
                                     }
                                     on:click=move |_event: MouseEvent| {
                                         let already_selected =
@@ -83,7 +79,7 @@ pub fn PresentColumn(
                                             view! { <span class="ml-2 text-xs text-gray-500">""</span> }.into_view()
                                         }
                                     }}
-                                    <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
+                                    // <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
                                 </button>
                             </li>
                         }

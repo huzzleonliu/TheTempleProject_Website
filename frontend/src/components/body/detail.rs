@@ -123,7 +123,7 @@ fn render_detail_item(
             let indicator = if has_children { "[+]" } else { "" };
             view! {
                 <div class="w-full min-w-0">
-                    <button class="w-full text-left truncate text-2xl px-2 py-2 rounded text-gray-400 hover:text-white hover:bg-gray-800 focus-within:bg-gray-700 transition-colors">
+                    <button class="w-full text-left truncate text-2xl px-2 py-2 text-gray-400 hover:text-white hover:bg-gray-800 focus-within:bg-gray-700 transition-colors">
                         <span>{label.clone()}</span>
                         <span class="ml-2 text-xs text-gray-500">{indicator}</span>
                         <div class="text-xs text-gray-600 break-all mt-1">{detail}</div>
@@ -136,7 +136,7 @@ fn render_detail_item(
             let rendered =
                 content.unwrap_or_else(|| "<p class=\"text-sm\">无法加载 Markdown 内容</p>".into());
             view! {
-                <div class="bg-gray-800 text-gray-100 px-3 py-3 rounded space-y-2">
+                <div class="bg-gray-800 text-gray-100 px-3 py-3 space-y-2">
                     <div class="font-semibold text-lg">{label.clone()}</div>
                     <div class="prose prose-invert max-w-none text-sm leading-6" inner_html=rendered></div>
                 </div>
@@ -148,7 +148,7 @@ fn render_detail_item(
             let src = asset_to_url(&path);
             view! {
                 <div class="space-y-1">
-                    <img src=src class="max-w-full rounded shadow" alt=label.clone()/>
+                    <img src=src class="max-w-full shadow" alt=label.clone()/>
                     <div class="text-xs text-gray-400 break-all">{path}</div>
                 </div>
             }
@@ -159,7 +159,7 @@ fn render_detail_item(
             let src = asset_to_url(&path);
             view! {
                 <div class="space-y-1">
-                    <video src=src.clone() controls class="w-full rounded shadow">
+                    <video src=src.clone() controls class="w-full shadow">
                         <track kind="captions"/>
                     </video>
                     <div class="text-xs text-gray-400 break-all">{path}</div>
@@ -174,7 +174,7 @@ fn render_detail_item(
             view! {
                 <div class="space-y-2">
                     <div class="font-semibold text-lg text-gray-100">{label.clone()}</div>
-                    <object data=src type="application/pdf" class="w-full h-[75vh] rounded border border-gray-700 bg-gray-900">
+                    <object data=src type="application/pdf" class="w-full h-[75vh] border border-gray-700 bg-gray-900">
                         <iframe src=iframe_src class="w-full h-full rounded" title=label.clone()></iframe>
                     </object>
                     <div class="text-xs text-gray-500 break-all">{path}</div>
@@ -229,7 +229,7 @@ fn render_listing_entry(
 
     let inner = move || {
         view! {
-            <div class="w-full text-left truncate text-2xl px-2 py-2 rounded text-gray-400 bg-gray-900/40 border border-gray-800 ">
+            <div class="w-full text-left truncate text-2xl px-2 py-2 text-gray-400 bg-gray-900/40 border border-gray-800 ">
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-gray-500">{badge}</span>
                     <span class="text-gray-100">{label.clone()}</span>
