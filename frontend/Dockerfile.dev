@@ -35,6 +35,6 @@ RUN rustup target add wasm32-unknown-unknown
 EXPOSE 80
 
 # Start nginx
-ENTRYPOINT ["trunk", "serve"]
+ENTRYPOINT ["TRUNK_COLOR=never", "trunk", "serve"]
 
 

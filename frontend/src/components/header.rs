@@ -1,3 +1,4 @@
+use crate::utils::lang::Lang;
 use crate::utils::types::parent_path;
 use leptos::prelude::*;
 
@@ -6,10 +7,35 @@ const ROOT_LABEL: &str = "/";
 // ---------------- Desktop Header ----------------
 #[component]
 pub fn Header() -> impl IntoView {
+    let lang = use_context::<RwSignal<Lang>>()
+        .expect("Lang context should be provided in App");
+
+    let title_text = move || match lang.get() {
+        Lang::Zh => "The Temple Project",
+        Lang::En => "The Temple Project",
+    };
+
+    let toggle_label = move || match lang.get() {
+        Lang::Zh => "中文",
+        Lang::En => "EN",
+    };
+
     view! {
         <header class="flex flex-col gap-2">
-            <h1 class="text-4xl font-semibold">"The Temple Project"</h1>
-            <p class="text-sm text-gray-500">"使用 hjkl 导航，Shift + J/K 翻页"</p>
+            <div class="flex items-center justify-between gap-4">
+                <h1 class="text-4xl font-semibold">
+                    {title_text}
+                </h1>
+                <button
+                    class="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:bg-gray-800"
+                    on:click=move |_| {
+                        lang.update(|l| *l = l.toggle());
+                    }
+                >
+                    <span class="material-icons-outlined text-base">language</span>
+                    <span>{toggle_label}</span>
+                </button>
+            </div>
         </header>
     }
 }
@@ -20,7 +46,20 @@ pub fn MobileHeader(
     current_path: RwSignal<Option<String>>,
     set_pending_path: WriteSignal<Option<String>>,
 ) -> impl IntoView {
+    let lang = use_context::<RwSignal<Lang>>()
+        .expect("Lang context should be provided in App");
+
     let segments = Memo::new(move |_| format_segments(current_path.get()));
+
+    let back_text = move || match lang.get() {
+        Lang::Zh => "返回",
+        Lang::En => "Back",
+    };
+
+    let toggle_label = move || match lang.get() {
+        Lang::Zh => "中文",
+        Lang::En => "EN",
+    };
 
     view! {
         <div class="h-[5vh] min-h-[48px] flex items-center gap-3 px-4 border-b border-gray-900">
@@ -37,7 +76,7 @@ pub fn MobileHeader(
                 }
                 disabled=move || current_path.get().is_none()
             >
-                "Back"
+                {back_text}
             </button>
             <div class="flex-1 flex gap-2 text-sm overflow-hidden">
                 <For
@@ -48,6 +87,15 @@ pub fn MobileHeader(
                     }
                 />
             </div>
+            <button
+                class="ml-auto px-2 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:bg-gray-800 inline-flex items-center gap-1"
+                on:click=move |_| {
+                    lang.update(|l| *l = l.toggle());
+                }
+            >
+                <span class="material-icons-outlined text-sm">language</span>
+                <span>{toggle_label}</span>
+            </button>
         </div>
     }
 }
