@@ -52,12 +52,13 @@ pub fn Home() -> impl IntoView {
     }
 
     view! {
-        <Show
-            when=move || is_mobile.get()
-            fallback=move || view! { <DesktopLayout logic=desktop_logic.clone() /> }
-        >
-            <MobileNavigator logic=mobile_logic.clone() />
-        </Show>
+        {move || {
+            if is_mobile.get() {
+                view! { <MobileNavigator logic=mobile_logic.clone() /> }.into_any()
+            } else {
+                view! { <DesktopLayout logic=desktop_logic.clone() /> }.into_any()
+            }
+        }}
     }
 }
 
