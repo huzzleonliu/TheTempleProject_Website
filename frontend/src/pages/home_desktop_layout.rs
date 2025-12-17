@@ -17,32 +17,21 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
         overview_select_callback,
         detail_scroll_ref,
         present_scroll_ref,
-        detail_nodes,
-        detail_loading,
-        detail_error,
-        detail_path,
+        detail_vm,
         selected_index,
         detail_click_callback,
         ..
     } = logic;
 
-    let detail_path_signal = detail_path.clone();
     let (desktop_detail_items, set_desktop_detail_items) = signal(Vec::<DetailItem>::new());
+    let (desktop_loading, set_desktop_loading) = signal(false);
+    let (desktop_error, set_desktop_error) = signal(None::<String>);
 
     Effect::new(move |_| {
-        let items = detail_nodes.get();
-        let forced = if detail_path_signal.get().is_some() {
-            items
-                .into_iter()
-                .map(|mut item| {
-                    item.display_as_entry = true;
-                    item
-                })
-                .collect()
-        } else {
-            items
-        };
-        set_desktop_detail_items.set(forced);
+        let vm = detail_vm.get();
+        set_desktop_loading.set(vm.loading);
+        set_desktop_error.set(vm.error);
+        set_desktop_detail_items.set(vm.items);
     });
 
     let on_detail_click: Arc<dyn Fn(DetailItem) + Send + Sync> = {
@@ -75,8 +64,8 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
                 <div class="col-span-5 h-full min-h-0 px-4 pt-0">
                     <DetailPanel
                         items=desktop_detail_items
-                        loading=detail_loading.read_only()
-                        error=detail_error.read_only()
+                        loading=desktop_loading
+                        error=desktop_error
                         scroll_container_ref=detail_scroll_ref
                         on_node_click=Some(on_detail_click.clone())
                     />

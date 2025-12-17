@@ -263,14 +263,16 @@ fn asset_to_url(raw_path: &str) -> String {
 // ---------------- Mobile Detail Wrapper ----------------
 #[component]
 pub fn Detail(logic: HomeLogic, on_node_click: Callback<Option<String>>) -> impl IntoView {
-    // Mobile should read from `detail_nodes` so markdown cache rendering is reflected.
-    let detail_nodes = logic.detail_nodes;
+    let detail_vm = logic.detail_vm;
     let (detail_items, set_detail_items) = signal(Vec::<DetailItem>::new());
+    let (detail_loading, set_detail_loading) = signal(false);
+    let (detail_error, set_detail_error) = signal(None::<String>);
     Effect::new(move |_| {
-        set_detail_items.set(detail_nodes.get());
+        let vm = detail_vm.get();
+        set_detail_items.set(vm.items);
+        set_detail_loading.set(vm.loading);
+        set_detail_error.set(vm.error);
     });
-    let detail_loading = logic.detail_loading.read_only();
-    let detail_error = logic.detail_error.read_only();
     let detail_scroll_ref = logic.detail_scroll_ref.clone();
     let pane_key = Memo::new({
         let current_path = logic.current_path.clone();

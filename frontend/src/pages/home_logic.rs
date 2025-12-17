@@ -1,12 +1,10 @@
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use gloo_net::http::Request;
 use leptos::callback::{Callback, UnsyncCallback};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use pulldown_cmark::{html, Options, Parser};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
@@ -17,15 +15,41 @@ use crate::utils::types::{
     NodesCache, UiNode, ROOT_PATH,
 };
 
+#[path = "home_logic/detail.rs"]
+mod detail;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DetailKey {
+    None,
+    Overview,
+    Directory(String),
+    Markdown(String),
+    Image(String),
+    Video(String),
+    Pdf(String),
+    Other(String),
+}
+
+/// Detail 的 ViewModel：这是 UI 直接消费的数据结构（VM = ViewModel）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetailVm {
+    pub loading: bool,
+    pub error: Option<String>,
+    pub items: Vec<DetailItem>,
+}
+
 /// 封装 Home 页面所需的所有信号、派生数据与操作方法。
 #[derive(Clone)]
 pub struct HomeLogic {
     pub selected_index: RwSignal<Option<usize>>,
-    pub detail_items: RwSignal<Vec<DetailItem>>,
-    pub detail_nodes: Memo<Vec<DetailItem>>,
-    pub detail_loading: RwSignal<bool>,
-    pub detail_error: RwSignal<Option<String>>,
-    pub detail_path: RwSignal<Option<String>>,
+    // NOTE: 这些字段正在被逐步收敛为 `detail_vm` 的内部实现细节。
+    // 外部模块应只依赖 `detail_vm`（以及必要的回调/节点列表），而不是直接读取这些派生中间态。
+    detail_items: RwSignal<Vec<DetailItem>>,
+    detail_nodes: Memo<Vec<DetailItem>>,
+    detail_loading: RwSignal<bool>,
+    detail_error: RwSignal<Option<String>>,
+    detail_path: RwSignal<Option<String>>,
+    pub detail_vm: Memo<DetailVm>,
 
     pub present_nodes: Memo<Vec<UiNode>>,
     pub overview_nodes: Memo<Vec<UiNode>>,
@@ -54,6 +78,7 @@ impl HomeLogic {
         let detail_path = RwSignal::new(None::<String>);
         let detail_items = RwSignal::new(Vec::<DetailItem>::new());
         let markdown_cache: RwSignal<HashMap<String, String>> = RwSignal::new(HashMap::new());
+        let markdown_inflight: RwSignal<HashSet<String>> = RwSignal::new(HashSet::new());
         let detail_loading = RwSignal::new(false);
         let detail_error = RwSignal::new(None::<String>);
         let detail_scroll_ref = NodeRef::<leptos::html::Div>::new();
@@ -121,6 +146,143 @@ impl HomeLogic {
                 combined
             }
         });
+
+        // Derived DetailKey (scaffolding; will drive Resources)
+        let detail_key = Memo::new({
+            let present_nodes = present_nodes.clone();
+            let selected_index = selected_index.clone();
+            move |_| {
+                let nodes = present_nodes.get();
+                if nodes.is_empty() {
+                    return DetailKey::None;
+                }
+
+                let idx = selected_index
+                    .get()
+                    .unwrap_or(0)
+                    .min(nodes.len().saturating_sub(1));
+                let Some(node) = nodes.get(idx) else { return DetailKey::None; };
+
+                match node.kind {
+                    NodeKind::Overview => DetailKey::Overview,
+                    NodeKind::Directory => node
+                        .directory_path
+                        .clone()
+                        .map(DetailKey::Directory)
+                        .unwrap_or(DetailKey::None),
+                    NodeKind::Markdown => node
+                        .raw_path
+                        .clone()
+                        .map(DetailKey::Markdown)
+                        .unwrap_or(DetailKey::None),
+                    NodeKind::Image => node
+                        .raw_path
+                        .clone()
+                        .map(DetailKey::Image)
+                        .unwrap_or(DetailKey::None),
+                    NodeKind::Video => node
+                        .raw_path
+                        .clone()
+                        .map(DetailKey::Video)
+                        .unwrap_or(DetailKey::None),
+                    NodeKind::Pdf => node
+                        .raw_path
+                        .clone()
+                        .map(DetailKey::Pdf)
+                        .unwrap_or(DetailKey::None),
+                    NodeKind::Other => node
+                        .raw_path
+                        .clone()
+                        .map(DetailKey::Other)
+                        .unwrap_or(DetailKey::None),
+                }
+            }
+        });
+
+        // Overview mode: list-first, then progressively fill markdown content into markdown_cache.
+        let overview_markdown_paths = Memo::new({
+            let detail_key = detail_key.clone();
+            let present_nodes = present_nodes.clone();
+            move |_| {
+                if !matches!(detail_key.get(), DetailKey::Overview) {
+                    return Vec::<String>::new();
+                }
+                present_nodes
+                    .get()
+                    .into_iter()
+                    .skip(1) // skip Overview item
+                    .filter_map(|n| {
+                        if matches!(n.kind, NodeKind::Markdown) {
+                            n.raw_path.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+        });
+
+        // Drive markdown_cache fetching for Overview (dedupe via markdown_inflight).
+        {
+            let markdown_cache = markdown_cache.clone();
+            let markdown_inflight = markdown_inflight.clone();
+            let detail_error = detail_error.clone();
+            let detail_key = detail_key.clone();
+            Effect::new(move |_| {
+                if !matches!(detail_key.get(), DetailKey::Overview) {
+                    return;
+                }
+
+                let paths = overview_markdown_paths.get();
+                for path in paths {
+                    let already_cached = markdown_cache.with(|c| c.contains_key(&path));
+                    let already_inflight = markdown_inflight.with(|s| s.contains(&path));
+                    if already_cached || already_inflight {
+                        continue;
+                    }
+
+                    markdown_inflight.update(|s| {
+                        s.insert(path.clone());
+                    });
+
+                    let markdown_cache = markdown_cache.clone();
+                    let markdown_inflight = markdown_inflight.clone();
+                    let detail_error = detail_error.clone();
+                    spawn_local(async move {
+                        match detail::fetch_text_asset(&path).await {
+                            Ok(markdown) => {
+                                markdown_cache.update(|cache| {
+                                    cache.insert(path.clone(), detail::render_markdown(&markdown));
+                                });
+                            }
+                            Err(err) => {
+                                detail_error.set(Some(err));
+                            }
+                        }
+                        markdown_inflight.update(|s| {
+                            s.remove(&path);
+                        });
+                    });
+                }
+            });
+        }
+
+        // Reflect Overview loading state based on cache completeness/inflight state.
+        {
+            let detail_loading = detail_loading.clone();
+            let detail_key = detail_key.clone();
+            let markdown_cache = markdown_cache.clone();
+            let markdown_inflight = markdown_inflight.clone();
+            Effect::new(move |_| {
+                if !matches!(detail_key.get(), DetailKey::Overview) {
+                    return;
+                }
+                let paths = overview_markdown_paths.get();
+                let any_missing = markdown_cache.with(|cache| paths.iter().any(|p| !cache.contains_key(p)));
+                let any_inflight = markdown_inflight.with(|s| !s.is_empty());
+                detail_loading.set(any_missing || any_inflight);
+            });
+        }
 
         let overview_nodes = Memo::new({
             let path_cache = path_cache.clone();
@@ -328,7 +490,6 @@ impl HomeLogic {
             let selected_index_signal = selected_index.clone();
             let detail_path_signal = detail_path.clone();
             let detail_items_signal = detail_items.clone();
-            let markdown_cache = markdown_cache.clone();
             let detail_loading_signal = detail_loading.clone();
             let detail_error_signal = detail_error.clone();
             let present_scroll_ref = present_scroll_ref.clone();
@@ -362,52 +523,8 @@ impl HomeLogic {
                     Some(node) => match node.kind {
                         NodeKind::Overview => {
                             detail_error_signal.set(None);
-                            let overview_items = build_detail_items_from_nodes(&nodes[1..]);
-                            let markdown_paths: Vec<String> = overview_items
-                                .iter()
-                                .filter_map(|item| {
-                                    if matches!(item.kind, NodeKind::Markdown) {
-                                        item.raw_path.clone()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-
-                            // 先把骨架列表塞进去，Markdown 的 HTML 由 markdown_cache 异步补齐
+                            let overview_items = detail::build_detail_items_from_nodes(&nodes[1..]);
                             detail_items_signal.set(overview_items);
-
-                            if markdown_paths.is_empty() {
-                                detail_loading_signal.set(false);
-                            } else {
-                                detail_loading_signal.set(true);
-                                let pending = Rc::new(Cell::new(markdown_paths.len()));
-                                for path in markdown_paths {
-                                    let pending = pending.clone();
-                                    let detail_loading_signal = detail_loading_signal.clone();
-                                    let detail_error_signal = detail_error_signal.clone();
-                                    let markdown_cache = markdown_cache.clone();
-                                    spawn_local(async move {
-                                        match fetch_text_asset(&path).await {
-                                            Ok(markdown) => {
-                                                markdown_cache.update(|cache| {
-                                                    cache.insert(path.clone(), render_markdown(&markdown));
-                                                });
-                                            }
-                                            Err(err) => {
-                                                detail_error_signal.set(Some(err));
-                                            }
-                                        }
-
-                                        let remaining = pending.get() - 1;
-                                        pending.set(remaining);
-                                        if remaining == 0 {
-                                            detail_loading_signal.set(false);
-                                        }
-                                    });
-                                }
-                            }
-
                             detail_path_signal.set(None);
                         }
                         NodeKind::Directory => {
@@ -433,26 +550,11 @@ impl HomeLogic {
                                 let detail_loading_signal = detail_loading_signal.clone();
                                 let detail_error_signal = detail_error_signal.clone();
                                 let detail_items_signal = detail_items_signal.clone();
-                                let markdown_cache = markdown_cache.clone();
-                                let item = detail_item_from_ui_node(node);
+                                let item = detail::detail_item_from_ui_node(node);
                                 detail_items_signal.set(vec![item.clone()]);
-                                spawn_local(async move {
-                                    match fetch_text_asset(&path).await {
-                                        Ok(content) => {
-                                            markdown_cache.update(|cache| {
-                                                cache.insert(path.clone(), render_markdown(&content));
-                                            });
-                                            // item 骨架已提前 set；这里不再修改 detail_items
-                                            detail_loading_signal.set(false);
-                                            detail_error_signal.set(None);
-                                        }
-                                        Err(err) => {
-                                            detail_items_signal.set(Vec::new());
-                                            detail_loading_signal.set(false);
-                                            detail_error_signal.set(Some(err));
-                                        }
-                                    }
-                                });
+                                // Markdown 的异步加载由后续 LocalResource 统一驱动（Resource refactor）。
+                                // 这里仅设置骨架 item 与 loading/error 初始状态。
+                                let _ = (detail_loading_signal, detail_error_signal, detail_items_signal, path);
                             } else {
                                 detail_loading_signal.set(false);
                                 detail_error_signal.set(Some("无法定位 Markdown 文件".into()));
@@ -462,53 +564,114 @@ impl HomeLogic {
                             detail_loading_signal.set(false);
                             detail_error_signal.set(None);
                             detail_path_signal.set(None);
-                            detail_items_signal.set(vec![detail_item_from_ui_node(node)]);
+                            detail_items_signal.set(vec![detail::detail_item_from_ui_node(node)]);
                         }
                     },
                 }
             });
         }
 
-        // Detail panel data loader
+        // Directory detail items are derived async from the focused key (DetailKey::Directory)
+        // via a LocalResource. For now we keep writing results back into the existing signals so UI
+        // remains unchanged during the refactor.
         {
-            let detail_path_signal = detail_path.clone();
             let path_cache = path_cache.clone();
             let assets_cache = assets_cache.clone();
+
+            let dir_items_res: LocalResource<Result<Vec<DetailItem>, String>> = {
+                let detail_key = detail_key.clone();
+                LocalResource::new(move || {
+                    let key = detail_key.get();
+                    let path_cache = path_cache.clone();
+                    let assets_cache = assets_cache.clone();
+                    async move {
+                        let DetailKey::Directory(path) = key else { return Ok(Vec::new()); };
+
+                        ensure_children(&path, path_cache.clone()).await?;
+                        let _ = ensure_assets(&path, assets_cache.clone()).await;
+
+                        let directories = path_cache
+                            .with(|map| map.get(&path).cloned())
+                            .unwrap_or_default();
+                        let assets = assets_cache
+                            .with(|map| map.get(&path).cloned())
+                            .unwrap_or_default();
+                        Ok(detail::build_detail_items_for_path(&directories, &assets))
+                    }
+                })
+            };
+
             let detail_items = detail_items.clone();
             let detail_loading = detail_loading.clone();
             let detail_error = detail_error.clone();
+            let detail_key = detail_key.clone();
             Effect::new(move |_| {
-                if let Some(path) = detail_path_signal.get() {
-                    detail_loading.set(true);
-                    detail_error.set(None);
-                    let path_cache = path_cache.clone();
-                    let assets_cache = assets_cache.clone();
-                    let detail_items = detail_items.clone();
-                    let detail_loading = detail_loading.clone();
-                    let detail_error = detail_error.clone();
-                    spawn_local(async move {
-                        let dirs_result = ensure_children(&path, path_cache.clone()).await;
-                        let assets_result = ensure_assets(&path, assets_cache.clone()).await;
-                        if let Err(e) = dirs_result {
-                            detail_error.set(Some(e));
-                            detail_items.set(Vec::new());
-                        } else if let Err(e) = assets_result {
-                            detail_error.set(Some(e));
-                            detail_items.set(Vec::new());
-                        } else {
-                            let directories = path_cache
-                                .with(|map| map.get(&path).cloned())
-                                .unwrap_or_default();
-                            let assets = assets_cache
-                                .with(|map| map.get(&path).cloned())
-                                .unwrap_or_default();
+                // Only drive the legacy signals when the focused key is a directory.
+                if !matches!(detail_key.get(), DetailKey::Directory(_)) {
+                    return;
+                }
+
+                let maybe = dir_items_res.get();
+                detail_loading.set(maybe.is_none());
+
+                if let Some(result) = maybe {
+                    match result {
+                        Ok(items) => {
                             detail_error.set(None);
-                            detail_items.set(build_detail_items_for_path(&directories, &assets));
+                            detail_items.set(items);
                         }
-                        detail_loading.set(false);
-                    });
-                } else {
-                    detail_loading.set(false);
+                        Err(e) => {
+                            detail_error.set(Some(e));
+                            detail_items.set(Vec::new());
+                        }
+                    }
+                }
+            });
+        }
+
+        // Markdown detail is derived async from the focused key (DetailKey::Markdown) via a LocalResource.
+        // For now we keep writing into markdown_cache + legacy loading/error signals.
+        {
+            let markdown_cache = markdown_cache.clone();
+            let detail_key = detail_key.clone();
+
+            let md_res: LocalResource<Result<(String, String), String>> = LocalResource::new({
+                let detail_key = detail_key.clone();
+                move || {
+                    let key = detail_key.get();
+                    async move {
+                        let DetailKey::Markdown(path) = key else {
+                            return Ok((String::new(), String::new()));
+                        };
+                        let raw = detail::fetch_text_asset(&path).await?;
+                        let rendered = detail::render_markdown(&raw);
+                        Ok((path, rendered))
+                    }
+                }
+            });
+
+            let detail_loading = detail_loading.clone();
+            let detail_error = detail_error.clone();
+            Effect::new(move |_| {
+                let DetailKey::Markdown(current_path) = detail_key.get() else { return; };
+
+                let maybe = md_res.get();
+                detail_loading.set(maybe.is_none());
+
+                if let Some(result) = maybe {
+                    match result {
+                        Ok((path, rendered)) => {
+                            if path == current_path && !path.is_empty() {
+                                markdown_cache.update(|cache| {
+                                    cache.insert(path, rendered);
+                                });
+                            }
+                            detail_error.set(None);
+                        }
+                        Err(e) => {
+                            detail_error.set(Some(e));
+                        }
+                    }
                 }
             });
         }
@@ -781,6 +944,70 @@ impl HomeLogic {
             });
         }
 
+        // Detail ViewModel (scaffolding; currently wraps the existing detail state)
+        let detail_vm = Memo::new({
+            let detail_nodes = detail_nodes.clone();
+            let detail_loading = detail_loading.clone();
+            let detail_error = detail_error.clone();
+            let detail_key = detail_key.clone();
+            move |_| {
+                let key = detail_key.get();
+                let loading = detail_loading.get();
+                let error = detail_error.get();
+                let items = detail_nodes.get();
+
+                match key {
+                    DetailKey::None => DetailVm {
+                        loading: false,
+                        error: None,
+                        items: Vec::new(),
+                    },
+                    DetailKey::Overview => DetailVm {
+                        loading,
+                        error,
+                        items,
+                    },
+                    DetailKey::Directory(_) => DetailVm {
+                        loading,
+                        error,
+                        // Desktop 需要强制以 entry 形式展示目录 listing；这里上移到 VM，避免 UI 依赖 detail_path。
+                        items: items
+                            .into_iter()
+                            .map(|mut item| {
+                                item.display_as_entry = true;
+                                item
+                            })
+                            .collect(),
+                    },
+                    DetailKey::Markdown(_) => DetailVm {
+                        loading,
+                        error,
+                        items,
+                    },
+                    DetailKey::Image(_) => DetailVm {
+                        loading,
+                        error,
+                        items,
+                    },
+                    DetailKey::Video(_) => DetailVm {
+                        loading,
+                        error,
+                        items,
+                    },
+                    DetailKey::Pdf(_) => DetailVm {
+                        loading,
+                        error,
+                        items,
+                    },
+                    DetailKey::Other(_) => DetailVm {
+                        loading,
+                        error,
+                        items,
+                    },
+                }
+            }
+        });
+
         HomeLogic {
             selected_index,
             detail_items,
@@ -788,6 +1015,7 @@ impl HomeLogic {
             detail_loading,
             detail_error,
             detail_path,
+            detail_vm,
             present_nodes,
             overview_nodes,
             overview_highlight,
@@ -880,80 +1108,6 @@ fn build_ui_nodes(directories: &[DirectoryNode], assets: &[AssetNode]) -> Vec<Ui
     nodes
 }
 
-fn build_detail_items_for_path(
-    directories: &[DirectoryNode],
-    assets: &[AssetNode],
-) -> Vec<DetailItem> {
-    let mut dir_items: Vec<DetailItem> = directories
-        .iter()
-        .map(|dir| DetailItem {
-            id: dir.path.clone(),
-            label: dir.raw_filename.clone(),
-            kind: NodeKind::Directory,
-            directory_path: Some(dir.path.clone()),
-            raw_path: None,
-            has_children: dir.has_subnodes,
-            content: None,
-            display_as_entry: true,
-        })
-        .collect();
-    dir_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-
-    let mut asset_items: Vec<DetailItem> = assets
-        .iter()
-        .map(|asset| DetailItem {
-            id: asset.file_path.clone(),
-            label: asset.raw_filename.clone(),
-            kind: classify_asset_kind(&asset.raw_filename),
-            directory_path: None,
-            raw_path: Some(asset.raw_path.clone()),
-            has_children: false,
-            content: None,
-            display_as_entry: false,
-        })
-        .collect();
-    asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-
-    dir_items.extend(asset_items);
-    dir_items
-}
-
-fn build_detail_items_from_nodes(nodes: &[UiNode]) -> Vec<DetailItem> {
-    let mut dir_items = Vec::new();
-    let mut asset_items = Vec::new();
-
-    for node in nodes
-        .iter()
-        .filter(|node| !matches!(node.kind, NodeKind::Overview))
-    {
-        let item = detail_item_from_ui_node(node);
-        if matches!(item.kind, NodeKind::Directory) {
-            dir_items.push(item);
-        } else {
-            asset_items.push(item);
-        }
-    }
-
-    dir_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-    asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-
-    dir_items.extend(asset_items);
-    dir_items
-}
-
-fn detail_item_from_ui_node(node: &UiNode) -> DetailItem {
-    DetailItem {
-        id: node.id.clone(),
-        label: node.label.clone(),
-        kind: node.kind.clone(),
-        directory_path: node.directory_path.clone(),
-        raw_path: node.raw_path.clone(),
-        has_children: node.has_children,
-        content: None,
-        display_as_entry: matches!(node.kind, NodeKind::Directory),
-    }
-}
-
 fn classify_asset_kind(filename: &str) -> NodeKind {
     let ext = filename.rsplit('.').next().map(|s| s.to_ascii_lowercase());
     match ext.as_deref() {
@@ -978,42 +1132,6 @@ fn scroll_selected_into_view(container_ref: &NodeRef<leptos::html::Div>, index: 
             }
         }
     }
-}
-
-async fn fetch_text_asset(path: &str) -> Result<String, String> {
-    let url = asset_to_url(path);
-    Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-fn asset_to_url(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
-    if normalized.starts_with("http://") || normalized.starts_with("https://") {
-        normalized
-    } else {
-        let trimmed = normalized.trim_start_matches('/');
-        let origin = web_sys::window()
-            .and_then(|w| w.location().origin().ok())
-            .unwrap_or_else(|| "".to_string());
-        let base = origin.trim_end_matches('/');
-        format!("{}/resource/{}", base, trimmed)
-    }
-}
-
-fn render_markdown(raw: &str) -> String {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
-    let parser = Parser::new_ext(raw, options);
-
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    html_output
 }
 
 // (debug logging helpers removed)
