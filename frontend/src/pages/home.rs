@@ -15,7 +15,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
-const MOBILE_BREAKPOINT_PX: f64 = 1200.0;
+const MOBILE_BREAKPOINT_PX: f64 = 800.0;
 
 /// 页面入口：聚焦数据如何在三栏间流动，操作细节位于 `logic` 模块。
 #[component]

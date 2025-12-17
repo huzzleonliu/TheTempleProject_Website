@@ -61,7 +61,7 @@ pub fn PresentColumn(
                             <li class="w-full min-w-0" data-index=idx_attr.clone()>
                                 <button
                                     class=move || {
-                                        format!("flex flex-row gap-1 {} items-center", button_style_builder(&node, is_selected.get()))
+                                        format!("flex flex-row gap-1 items-center {}", button_style_builder(&node, is_selected.get()))
                                     }
                                     on:click=move |_event: MouseEvent| {
                                         let already_selected =
@@ -73,14 +73,14 @@ pub fn PresentColumn(
                                     }
                                 >
                                     <ButtonIconMatcher kind=node_clone.kind.clone() />
-                                    {label}
-                                    {move || {
-                                        if is_directory && node_clone.has_children {
-                                            view! { <span class="ml-2 text-xs text-gray-500">"[+]"</span> }.into_view()
-                                        } else {
-                                            view! { <span class="ml-2 text-xs text-gray-500">""</span> }.into_view()
-                                        }
-                                    }}
+                                    <span class="min-w-0 flex-1 truncate">{label}</span>
+                                    // {move || {
+                                    //     if is_directory && node_clone.has_children {
+                                    //         view! { <span class="ml-2 text-xs text-gray-500">"[+]"</span> }.into_view()
+                                    //     } else {
+                                    //         view! { <span class="ml-2 text-xs text-gray-500">""</span> }.into_view()
+                                    //     }
+                                    // }}
                                     // <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
                                 </button>
                             </li>

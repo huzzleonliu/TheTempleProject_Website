@@ -32,7 +32,7 @@ pub fn OverviewColumn(
                         <li class="w-full min-w-0 flex flex-row gap-1">
                             <button
                                 class=move || {
-                                    format!("flex flex-row gap-1 {} items-center", button_style_builder(&node, false))
+                                    format!("flex w-full gap-1 items-center {} ", button_style_builder(&node, false))
                                 }
                                 on:click=move |_| {
                                     if matches!(node_clone.kind, NodeKind::Directory) {
@@ -44,7 +44,7 @@ pub fn OverviewColumn(
                                 }
                             >
                                 <ButtonIconMatcher kind=node_clone.kind.clone() />
-                                {label}
+                                <span class="min-w-0 flex-1 truncate">{label}</span>
                                 // <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
                             </button>
                         </li>
