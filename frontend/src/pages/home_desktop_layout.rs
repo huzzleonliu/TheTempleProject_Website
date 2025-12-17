@@ -4,6 +4,7 @@ use crate::components::footer::Footer;
 use crate::components::header::Header;
 use crate::utils::types::DetailItem;
 use leptos::prelude::*;
+use std::sync::Arc;
 
 #[component]
 pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
@@ -16,20 +17,20 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
         overview_select_callback,
         detail_scroll_ref,
         present_scroll_ref,
-        detail_items,
+        detail_nodes,
         detail_loading,
         detail_error,
         detail_path,
         selected_index,
+        detail_click_callback,
         ..
     } = logic;
 
-    let raw_detail_items = detail_items.read_only();
     let detail_path_signal = detail_path.clone();
     let (desktop_detail_items, set_desktop_detail_items) = signal(Vec::<DetailItem>::new());
 
     Effect::new(move |_| {
-        let items = raw_detail_items.get();
+        let items = detail_nodes.get();
         let forced = if detail_path_signal.get().is_some() {
             items
                 .into_iter()
@@ -43,6 +44,11 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
         };
         set_desktop_detail_items.set(forced);
     });
+
+    let on_detail_click: Arc<dyn Fn(DetailItem) + Send + Sync> = {
+        let cb = detail_click_callback.clone();
+        Arc::new(move |item: DetailItem| cb.run(item))
+    };
 
     view! {
         <div class="flex flex-col h-screen">
@@ -72,6 +78,7 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
                         loading=detail_loading.read_only()
                         error=detail_error.read_only()
                         scroll_container_ref=detail_scroll_ref
+                        on_node_click=Some(on_detail_click.clone())
                     />
                 </div>
             </div>

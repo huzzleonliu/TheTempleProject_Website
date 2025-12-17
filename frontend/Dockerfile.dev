@@ -9,6 +9,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # Install Trunk
 RUN cargo install trunk --locked
 
+# Preinstall wasm-bindgen to avoid Trunk downloading tool archives at runtime
+# (network hiccups during download cause build failure and then server returns 404 for "/")
+RUN cargo install wasm-bindgen-cli --version 0.2.100 --locked
+
 # Set working directory
 WORKDIR /app
 
@@ -34,7 +38,8 @@ RUN rustup target add wasm32-unknown-unknown
 # Expose port 80
 EXPOSE 80
 
-# Start nginx
-ENTRYPOINT ["TRUNK_COLOR=never", "trunk", "serve"]
+# Default: run Trunk dev server (Trunk.toml already sets address/port)
+ENV TRUNK_COLOR=never
+ENTRYPOINT ["trunk", "serve"]
 
 

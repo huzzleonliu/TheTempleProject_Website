@@ -5,6 +5,8 @@ use leptos::prelude::*;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
+// NOTE: `For` 的 children 闭包要求 `Send`，因此这里的回调类型需要 `Send + Sync`。
+
 // ---------------- Shared Detail Panel ----------------
 #[component]
 pub fn DetailPanel(

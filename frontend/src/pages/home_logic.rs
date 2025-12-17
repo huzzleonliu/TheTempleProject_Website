@@ -1,16 +1,14 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use gloo_net::http::Request;
-use leptos::callback::UnsyncCallback;
+use leptos::callback::{Callback, UnsyncCallback};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use pulldown_cmark::{html, Options, Parser};
-use serde_json;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
-use wasm_bindgen::JsValue;
 
 use crate::utils::api::{get_child_directories, get_node_assets, get_root_directories};
 use crate::utils::keyboard;
@@ -24,6 +22,7 @@ use crate::utils::types::{
 pub struct HomeLogic {
     pub selected_index: RwSignal<Option<usize>>,
     pub detail_items: RwSignal<Vec<DetailItem>>,
+    pub detail_nodes: Memo<Vec<DetailItem>>,
     pub detail_loading: RwSignal<bool>,
     pub detail_error: RwSignal<Option<String>>,
     pub detail_path: RwSignal<Option<String>>,
@@ -42,6 +41,8 @@ pub struct HomeLogic {
 
     pub current_path: RwSignal<Option<String>>,
     pub keyboard_enabled: RwSignal<bool>,
+
+    pub detail_click_callback: Callback<DetailItem>,
 }
 
 impl HomeLogic {
@@ -52,11 +53,36 @@ impl HomeLogic {
         let selected_index = RwSignal::new(None::<usize>);
         let detail_path = RwSignal::new(None::<String>);
         let detail_items = RwSignal::new(Vec::<DetailItem>::new());
+        let markdown_cache: RwSignal<HashMap<String, String>> = RwSignal::new(HashMap::new());
         let detail_loading = RwSignal::new(false);
         let detail_error = RwSignal::new(None::<String>);
         let detail_scroll_ref = NodeRef::<leptos::html::Div>::new();
         let present_scroll_ref = NodeRef::<leptos::html::Div>::new();
         let keyboard_enabled = RwSignal::new(true);
+        let pending_detail_click = RwSignal::new(None::<DetailItem>);
+
+        let detail_nodes = Memo::new({
+            let detail_items = detail_items.clone();
+            let markdown_cache = markdown_cache.clone();
+            move |_| {
+                let items = detail_items.get();
+                markdown_cache.with(|cache| {
+                    items
+                        .into_iter()
+                        .map(|mut item| {
+                            if matches!(item.kind, NodeKind::Markdown) {
+                                if let Some(path) = item.raw_path.as_ref() {
+                                    if let Some(rendered) = cache.get(path) {
+                                        item.content = Some(rendered.clone());
+                                    }
+                                }
+                            }
+                            item
+                        })
+                        .collect::<Vec<_>>()
+                })
+            }
+        });
 
         let present_nodes = Memo::new({
             let path_cache = path_cache.clone();
@@ -92,7 +118,6 @@ impl HomeLogic {
                 let mut combined = Vec::with_capacity(nodes.len() + 1);
                 combined.push(overview_node);
                 combined.append(&mut nodes);
-                log_nodes("present_nodes", &key, &combined);
                 combined
             }
         });
@@ -107,7 +132,6 @@ impl HomeLogic {
                         let parent = parent_path(&path).unwrap_or_else(|| ROOT_PATH.to_string());
                         let directories = cache.get(&parent).cloned().unwrap_or_default();
                         let snapshot = build_ui_nodes(&directories, &[] as &[AssetNode]);
-                        log_nodes("overview_nodes", &parent, &snapshot);
                         snapshot
                     }
                     None => vec![UiNode {
@@ -162,26 +186,15 @@ impl HomeLogic {
                 let present_nodes = present_nodes.clone();
                 let present_scroll_ref = present_scroll_ref.clone();
                 spawn_local(async move {
-                    log_target("[导航] 请求", target.as_deref());
                     if let Err(e) =
                         ensure_path_and_ancestors(target.as_ref(), path_cache.clone()).await
                     {
-                        web_sys::console::log_2(&"[导航] 加载失败".into(), &JsValue::from_str(&e));
+                        let _ = e;
                         return;
                     }
 
-                    let cache_key = target
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| ROOT_PATH.to_string());
-
                     if let Some(ref path) = target {
-                        if let Err(e) = ensure_assets(path, assets_cache.clone()).await {
-                            web_sys::console::log_2(
-                                &"[导航] 资源加载失败".into(),
-                                &JsValue::from_str(&e),
-                            );
-                        }
+                        let _ = ensure_assets(path, assets_cache.clone()).await;
                     }
 
                     current_path.set(target.clone());
@@ -214,7 +227,6 @@ impl HomeLogic {
                                 }
                             });
                     detail_path.set(detail_target);
-                    log_nodes("navigate_to.nodes", cache_key.as_str(), &nodes);
                 });
             }
         });
@@ -272,19 +284,11 @@ impl HomeLogic {
                             let parent =
                                 parent_path(&path).unwrap_or_else(|| ROOT_PATH.to_string());
                             if let Err(e) = ensure_children(&parent, path_cache.clone()).await {
-                                web_sys::console::log_2(
-                                    &"[返回上级] 加载父级失败".into(),
-                                    &JsValue::from_str(&e),
-                                );
+                                let _ = e;
                                 return;
                             }
                             if !parent.is_empty() {
-                                if let Err(e) = ensure_assets(&parent, assets_cache.clone()).await {
-                                    web_sys::console::log_2(
-                                        &"[返回上级] 加载资源失败".into(),
-                                        &JsValue::from_str(&e),
-                                    );
-                                }
+                                let _ = ensure_assets(&parent, assets_cache.clone()).await;
                             }
 
                             let directories = path_cache
@@ -324,6 +328,7 @@ impl HomeLogic {
             let selected_index_signal = selected_index.clone();
             let detail_path_signal = detail_path.clone();
             let detail_items_signal = detail_items.clone();
+            let markdown_cache = markdown_cache.clone();
             let detail_loading_signal = detail_loading.clone();
             let detail_error_signal = detail_error.clone();
             let present_scroll_ref = present_scroll_ref.clone();
@@ -358,47 +363,42 @@ impl HomeLogic {
                         NodeKind::Overview => {
                             detail_error_signal.set(None);
                             let overview_items = build_detail_items_from_nodes(&nodes[1..]);
-                            let markdown_indices: Vec<(usize, String)> = overview_items
+                            let markdown_paths: Vec<String> = overview_items
                                 .iter()
-                                .enumerate()
-                                .filter_map(|(idx, item)| {
+                                .filter_map(|item| {
                                     if matches!(item.kind, NodeKind::Markdown) {
-                                        item.raw_path.clone().map(|path| (idx, path))
+                                        item.raw_path.clone()
                                     } else {
                                         None
                                     }
                                 })
                                 .collect();
 
-                            if markdown_indices.is_empty() {
+                            // 先把骨架列表塞进去，Markdown 的 HTML 由 markdown_cache 异步补齐
+                            detail_items_signal.set(overview_items);
+
+                            if markdown_paths.is_empty() {
                                 detail_loading_signal.set(false);
-                                detail_items_signal.set(overview_items);
                             } else {
                                 detail_loading_signal.set(true);
-                                let shared_items = Rc::new(RefCell::new(overview_items));
-                                let pending = Rc::new(Cell::new(markdown_indices.len()));
-
-                                detail_items_signal.set(shared_items.borrow().clone());
-
-                                for (idx, path) in markdown_indices {
-                                    let shared_items = shared_items.clone();
+                                let pending = Rc::new(Cell::new(markdown_paths.len()));
+                                for path in markdown_paths {
                                     let pending = pending.clone();
-                                    let detail_items_signal = detail_items_signal.clone();
                                     let detail_loading_signal = detail_loading_signal.clone();
                                     let detail_error_signal = detail_error_signal.clone();
+                                    let markdown_cache = markdown_cache.clone();
                                     spawn_local(async move {
                                         match fetch_text_asset(&path).await {
                                             Ok(markdown) => {
-                                                let mut items = shared_items.borrow_mut();
-                                                if let Some(item) = items.get_mut(idx) {
-                                                    item.content = Some(render_markdown(&markdown));
-                                                }
-                                                detail_items_signal.set(items.clone());
+                                                markdown_cache.update(|cache| {
+                                                    cache.insert(path.clone(), render_markdown(&markdown));
+                                                });
                                             }
                                             Err(err) => {
                                                 detail_error_signal.set(Some(err));
                                             }
                                         }
+
                                         let remaining = pending.get() - 1;
                                         pending.set(remaining);
                                         if remaining == 0 {
@@ -433,13 +433,16 @@ impl HomeLogic {
                                 let detail_loading_signal = detail_loading_signal.clone();
                                 let detail_error_signal = detail_error_signal.clone();
                                 let detail_items_signal = detail_items_signal.clone();
+                                let markdown_cache = markdown_cache.clone();
                                 let item = detail_item_from_ui_node(node);
+                                detail_items_signal.set(vec![item.clone()]);
                                 spawn_local(async move {
                                     match fetch_text_asset(&path).await {
                                         Ok(content) => {
-                                            let mut rendered = item;
-                                            rendered.content = Some(render_markdown(&content));
-                                            detail_items_signal.set(vec![rendered]);
+                                            markdown_cache.update(|cache| {
+                                                cache.insert(path.clone(), render_markdown(&content));
+                                            });
+                                            // item 骨架已提前 set；这里不再修改 detail_items
                                             detail_loading_signal.set(false);
                                             detail_error_signal.set(None);
                                         }
@@ -533,10 +536,7 @@ impl HomeLogic {
 
                 spawn_local(async move {
                     if let Err(e) = ensure_children(ROOT_PATH, path_cache.clone()).await {
-                        web_sys::console::log_2(
-                            &"[初始化] 根节点加载失败".into(),
-                            &JsValue::from_str(&e),
-                        );
+                        let _ = e;
                         return;
                     }
 
@@ -617,22 +617,10 @@ impl HomeLogic {
                         "keydown",
                         handle_global_keydown.as_ref().unchecked_ref(),
                     ) {
-                        web_sys::console::log_2(
-                            &"[事件] 注册键盘监听失败".into(),
-                            &JsValue::from(err),
-                        );
+                        let _ = err;
                     }
                 }
                 handle_global_keydown.forget();
-            });
-        }
-
-        // 调试：current_path 变化日志
-        {
-            let current_path = current_path.clone();
-            Effect::new(move |_| {
-                let path = current_path.get();
-                log_target("[路径] 当前路径", path.as_deref());
             });
         }
 
@@ -670,19 +658,11 @@ impl HomeLogic {
                             let parent =
                                 parent_path(&path).unwrap_or_else(|| ROOT_PATH.to_string());
                             if let Err(e) = ensure_children(&parent, path_cache.clone()).await {
-                                web_sys::console::log_2(
-                                    &"[OverviewColumn] 加载父级失败".into(),
-                                    &JsValue::from_str(&e),
-                                );
+                                let _ = e;
                                 return;
                             }
                             if !parent.is_empty() {
-                                if let Err(e) = ensure_assets(&parent, assets_cache.clone()).await {
-                                    web_sys::console::log_2(
-                                        &"[OverviewColumn] 加载资源失败".into(),
-                                        &JsValue::from_str(&e),
-                                    );
-                                }
+                                let _ = ensure_assets(&parent, assets_cache.clone()).await;
                             }
 
                             let directories = path_cache
@@ -721,9 +701,90 @@ impl HomeLogic {
             })
         };
 
+        // Detail 点击回调（需要 Send+Sync）：只负责把点击事件写入信号，实际导航逻辑由 HomeLogic 内部 effect 执行。
+        let detail_click_callback = {
+            let pending = pending_detail_click.clone();
+            Callback::new(move |item: DetailItem| {
+                pending.set(Some(item));
+            })
+        };
+
+        // 处理 detail 点击（在 HomeLogic 内部执行，可捕获非 Send 的 Rc 闭包等）
+        {
+            let pending = pending_detail_click.clone();
+            let navigate_to = navigate_to.clone();
+            let present_nodes = present_nodes.clone();
+            let selected_index = selected_index.clone();
+            let path_cache = path_cache.clone();
+            let assets_cache = assets_cache.clone();
+            Effect::new(move |_| {
+                let Some(item) = pending.get() else { return; };
+                pending.set(None);
+
+                if !matches!(item.kind, NodeKind::Directory) {
+                    return;
+                }
+                let clicked_path = match item.directory_path.clone() {
+                    Some(p) if !p.is_empty() => p,
+                    _ => return,
+                };
+
+                let focused = selected_index
+                    .get_untracked()
+                    .and_then(|idx| present_nodes.get_untracked().get(idx).cloned());
+                let focused_kind = focused.as_ref().map(|n| n.kind.clone());
+
+                match focused_kind {
+                    Some(NodeKind::Overview) => {
+                        // 场景 2：光标在 Overview，点击 D；进入 D，光标停留在 Overview（idx=0）
+                        navigate_to(Some(clicked_path), Some(0));
+                    }
+                    Some(NodeKind::Directory) => {
+                        // 场景 1：光标在目录 A，点击 A 的子目录 C；进入 A，并将 C 设为选中（idx=C+1）
+                        let focused_dir = focused
+                            .as_ref()
+                            .and_then(|n| n.directory_path.clone())
+                            .filter(|p| !p.is_empty());
+                        let Some(a_path) = focused_dir else { return; };
+
+                        let path_cache = path_cache.clone();
+                        let assets_cache = assets_cache.clone();
+                        let navigate_to = navigate_to.clone();
+
+                        spawn_local(async move {
+                            if let Err(e) = ensure_children(&a_path, path_cache.clone()).await {
+                                let _ = e;
+                                return;
+                            }
+                            if let Err(e) = ensure_assets(&a_path, assets_cache.clone()).await {
+                                let _ = e;
+                            }
+
+                            let directories = path_cache
+                                .with(|map| map.get(&a_path).cloned())
+                                .unwrap_or_default();
+                            let assets = assets_cache
+                                .with(|map| map.get(&a_path).cloned())
+                                .unwrap_or_default();
+
+                            let ui_nodes = build_ui_nodes(&directories, &assets);
+                            let idx_in_list = ui_nodes.iter().position(|node| {
+                                matches!(node.kind, NodeKind::Directory)
+                                    && node.directory_path.as_deref() == Some(clicked_path.as_str())
+                            });
+                            let preferred = idx_in_list.map(|idx| idx + 1);
+                            navigate_to(Some(a_path), preferred);
+                        });
+                    }
+                    _ => {}
+                }
+            });
+        }
+
         HomeLogic {
             selected_index,
             detail_items,
+            detail_nodes,
             detail_loading,
             detail_error,
             detail_path,
@@ -738,6 +799,7 @@ impl HomeLogic {
             present_scroll_ref,
             current_path,
             keyboard_enabled,
+            detail_click_callback,
         }
     }
 }
@@ -954,25 +1016,4 @@ fn render_markdown(raw: &str) -> String {
     html_output
 }
 
-fn log_nodes(label: &str, path: &str, nodes: &[UiNode]) {
-    if let Ok(serialized) = serde_json::to_string(nodes) {
-        web_sys::console::log_3(
-            &JsValue::from_str("[节点]"),
-            &JsValue::from_str(label),
-            &JsValue::from_str(&format!("path={path}, nodes={serialized}")),
-        );
-    } else {
-        web_sys::console::log_3(
-            &JsValue::from_str("[节点]"),
-            &JsValue::from_str(label),
-            &JsValue::from_str(&format!("path={path}, nodes={:?}", nodes)),
-        );
-    }
-}
-
-fn log_target(label: &str, target: Option<&str>) {
-    web_sys::console::log_2(
-        &JsValue::from_str(label),
-        &JsValue::from_str(target.unwrap_or("<root>")),
-    );
-}
+// (debug logging helpers removed)

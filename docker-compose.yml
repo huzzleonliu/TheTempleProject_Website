@@ -1,35 +1,38 @@
 services:
   frontend:
-    container_name: tp_frontend  # 容器名称
-    build: 
-      context: ./frontend  # 前端 Dockerfile 目录
-      dockerfile: Dockerfile.prod  # 使用生产环境的 Dockerfile
+    container_name: tp_frontend # 容器名称
+    build:
+      context: ./frontend # 前端 Dockerfile 目录
+      dockerfile: Dockerfile.prod # 使用生产环境的 Dockerfile
     networks:
       - the_temple_project_net
     expose:
       - "80"
 
   frontend_dev:
-    container_name: tp_frontend_dev  # 容器名称
-    build: 
-      context: ./frontend  # 前端 Dockerfile 目录
-      dockerfile: Dockerfile.dev  # 使用开发环境的 Dockerfile
+    container_name: tp_frontend_dev # 容器名称
+    build:
+      context: ./frontend # 前端 Dockerfile 目录
+      dockerfile: Dockerfile.dev # 使用开发环境的 Dockerfile
     networks:
       - the_temple_project_net
     expose:
       - "80"
     ports:
-      - "8081:80"  # 映射端口到宿主机
+      - "8081:80" # 映射端口到宿主机
     volumes:
       - type: bind
         source: ./frontend
-        target: /app  
-       # 添加下面这段，保护 node_modules 不被覆盖
+        target: /app
+      # 添加下面这段，保护 node_modules 不被覆盖
       - /app/node_modules
+      # 保护 dist/target 不被宿主机或其它 trunk 进程互相覆盖（避免 js/wasm 丢失导致 MIME 报错白屏）
+      - /app/dist
+      - /app/target
 
   backend:
-    container_name: tp_backend  # 容器名称
-    build: ./backend  # 后端 Dockerfile 目录
+    container_name: tp_backend # 容器名称
+    build: ./backend # 后端 Dockerfile 目录
     networks:
       - the_temple_project_net
     environment:
@@ -37,25 +40,25 @@ services:
     expose:
       - "80"
     depends_on:
-      - database  # 确保数据库容器先启动
+      - database # 确保数据库容器先启动
 
   database:
     container_name: tp_database
-    build: ./database  
+    build: ./database
     networks:
       - the_temple_project_net
     expose:
       - "5432"
     ports:
-      - "5433:5432"  # 映射端口到宿主机
+      - "5433:5432" # 映射端口到宿主机
     volumes:
       - type: bind
         source: ./database/import_exchange
-        target: /import_exchange  # CSV 交换目录
+        target: /import_exchange # CSV 交换目录
 
   resource:
-    container_name: tp_resource  # 容器名称
-    build: ./resource  # 资源服务 Dockerfile 目录
+    container_name: tp_resource # 容器名称
+    build: ./resource # 资源服务 Dockerfile 目录
     networks:
       - the_temple_project_net
     environment:
@@ -65,11 +68,11 @@ services:
     volumes:
       - type: bind
         source: ./resource/resource
-        target: /resource  # 将宿主 /resource/ 直接映射进容器
+        target: /resource # 将宿主 /resource/ 直接映射进容器
 
   nginx:
-    container_name: tp_nginx  # 容器名称
-    build: ./nginx  # Dockerfile 所在目录
+    container_name: tp_nginx # 容器名称
+    build: ./nginx # Dockerfile 所在目录
     ports:
       - "8080:80"
     networks:
@@ -77,11 +80,11 @@ services:
     depends_on:
       - frontend
       - backend
-      - resource  # 确保前端、后端和资源服务先启动
+      - resource # 确保前端、后端和资源服务先启动
     volumes:
       - type: bind
         source: ./nginx/nginx/
         target: /etc/nginx/ # 挂载 Nginx 配置文件目录
 
 networks:
-  the_temple_project_net:  # 自定义网络确保容器间通过名称通信
+  the_temple_project_net: # 自定义网络确保容器间通过名称通信
