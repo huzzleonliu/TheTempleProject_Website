@@ -89,12 +89,12 @@ pub fn MobileHeader(
                 />
             </div>
             <button
-                class="ml-auto px-2 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:bg-gray-800 inline-flex items-center gap-1"
+                class="ml-auto px-2 py-1 rounded-full border border-gray-700 text-sm text-gray-300 hover:bg-gray-800 inline-flex items-center gap-1"
                 on:click=move |_| {
                     lang.update(|l| *l = l.toggle());
                 }
             >
-                <span class="material-icons-outlined text-sm">language</span>
+                <Icon icon=icondata::LuGlobe />
                 <span>{toggle_label}</span>
             </button>
         </div>
