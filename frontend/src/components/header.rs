@@ -1,6 +1,7 @@
 use crate::utils::lang::Lang;
 use crate::utils::types::parent_path;
 use leptos::prelude::*;
+use leptos_icons::Icon;
 
 const ROOT_LABEL: &str = "/";
 
@@ -11,7 +12,7 @@ pub fn Header() -> impl IntoView {
         .expect("Lang context should be provided in App");
 
     let title_text = move || match lang.get() {
-        Lang::Zh => "The Temple Project",
+        Lang::Zh => "神庙计划",
         Lang::En => "The Temple Project",
     };
 
@@ -27,12 +28,12 @@ pub fn Header() -> impl IntoView {
                     {title_text}
                 </h1>
                 <button
-                    class="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-gray-700 text-xs text-gray-300 hover:bg-gray-800"
+                    class="inline-flex items-center gap-1 px-3 py-1 border border-gray-700 text-md text-gray-300 hover:bg-gray-900"
                     on:click=move |_| {
                         lang.update(|l| *l = l.toggle());
                     }
                 >
-                    <span class="material-icons-outlined text-base">language</span>
+                    <Icon icon=icondata::LuGlobe />
                     <span>{toggle_label}</span>
                 </button>
             </div>

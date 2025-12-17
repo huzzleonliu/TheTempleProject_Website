@@ -3,7 +3,8 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use wasm_bindgen::JsValue;
 
-use crate::utils::button_class_builder;
+use crate::utils::button_style_builder;
+use crate::utils::ButtonIconMatcher;
 use crate::{NodeKind, UiNode};
 
 fn log_present_state(nodes: &[UiNode], selected: Option<usize>) {
@@ -60,7 +61,7 @@ pub fn PresentColumn(
                             <li class="w-full min-w-0" data-index=idx_attr.clone()>
                                 <button
                                     class=move || {
-                                        button_class_builder(&node, is_selected.get())
+                                        format!("flex flex-row gap-1 {} items-center", button_style_builder(&node, is_selected.get()))
                                     }
                                     on:click=move |_event: MouseEvent| {
                                         let already_selected =
@@ -71,6 +72,7 @@ pub fn PresentColumn(
                                         }
                                     }
                                 >
+                                    <ButtonIconMatcher kind=node_clone.kind.clone() />
                                     {label}
                                     {move || {
                                         if is_directory && node_clone.has_children {

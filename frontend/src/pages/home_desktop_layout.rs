@@ -46,7 +46,7 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
 
     view! {
         <div class="flex flex-col h-screen">
-            <div class="px-4 pt-4 pb-0 flex-shrink-0">
+            <div class="px-4 pt-4 pb-12 flex-shrink-0">
                 <Header/>
             </div>
             <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden items-start">

@@ -2,7 +2,8 @@ use leptos::callback::{Callable, UnsyncCallback};
 use leptos::prelude::*;
 
 use crate::{NodeKind, UiNode};
-use crate::utils::button_class_builder;
+use crate::utils::button_style_builder;
+use crate::utils::ButtonIconMatcher;
 
 /// Overview 栏：展示“当前位置的父级层级”列表，帮助用户在层级间快速回退。
 #[component]
@@ -28,10 +29,10 @@ pub fn OverviewColumn(
                     let node_clone = node.clone();
 
                     view! {
-                        <li class="w-full min-w-0">
+                        <li class="w-full min-w-0 flex flex-row gap-1">
                             <button
                                 class=move || {
-                                    button_class_builder(&node, false)
+                                    format!("flex flex-row gap-1 {} items-center", button_style_builder(&node, false))
                                 }
                                 on:click=move |_| {
                                     if matches!(node_clone.kind, NodeKind::Directory) {
@@ -42,6 +43,7 @@ pub fn OverviewColumn(
                                     }
                                 }
                             >
+                                <ButtonIconMatcher kind=node_clone.kind.clone() />
                                 {label}
                                 // <div class="text-xs text-gray-600 break-all">{detail.clone()}</div>
                             </button>

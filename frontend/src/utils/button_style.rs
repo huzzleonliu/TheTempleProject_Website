@@ -1,7 +1,9 @@
 use crate::{NodeKind, UiNode};
+use leptos_icons::Icon;
+use leptos::prelude::*;
 
-pub fn button_class_builder(node: &UiNode, is_selected: bool) -> String {
-    let base = "w-full h-full text-left truncate text-base px-2";
+pub fn button_style_builder(node: &UiNode, is_selected: bool) -> String {
+    let base = "h-full text-left truncate text-base px-2";
     let type_class = match &node.kind {
         NodeKind::Directory => {
             if is_selected { "text-black font-bold bg-green-500 hover:text-black hover:bg-green-500 focus-within:bg-green-700" } 
@@ -33,4 +35,17 @@ pub fn button_class_builder(node: &UiNode, is_selected: bool) -> String {
         }
     };
     format!("{base} {type_class} hover:text-black hover:bg-gray-400 focus-within:bg-gray-500")
+}
+
+#[component]
+pub fn ButtonIconMatcher(kind: NodeKind) -> impl IntoView {
+    match kind {
+        NodeKind::Directory => view! { <Icon icon=icondata::LuFolder /> },
+        NodeKind::Markdown => view! { <Icon icon=icondata::LuFileText /> },
+        NodeKind::Image => view! { <Icon icon=icondata::LuImage /> },
+        NodeKind::Video => view! { <Icon icon=icondata::LuVideo /> },
+        NodeKind::Pdf => view! { <Icon icon=icondata::LuFileType /> },
+        NodeKind::Other => view! { <Icon icon=icondata::LuFile /> },
+        NodeKind::Overview => view! { <Icon icon=icondata::LuFiles /> },
+    }
 }
