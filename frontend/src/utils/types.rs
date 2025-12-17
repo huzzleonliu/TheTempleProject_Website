@@ -43,19 +43,6 @@ pub struct UiNode {
     pub has_children: bool,
 }
 
-/// Detail 栏展示所需的节点/资源描述
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct DetailItem {
-    pub id: String,
-    pub label: String,
-    pub kind: NodeKind,
-    pub directory_path: Option<String>,
-    pub raw_path: Option<String>,
-    pub has_children: bool,
-    pub content: Option<String>,
-    pub display_as_entry: bool,
-}
-
 /// 目录列表 API 响应体
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DirectoriesResponse {

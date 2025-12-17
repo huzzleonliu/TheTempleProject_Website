@@ -47,11 +47,6 @@ pub fn PresentColumn(
                             move |_| selected_index.get() == Some(idx)
                         });
                         let label = node.label.clone();
-                        let detail = node
-                            .raw_path
-                            .clone()
-                            .or_else(|| node.directory_path.clone())
-                            .unwrap_or_default();
                         let is_directory = matches!(node.kind, NodeKind::Directory);
                         let node_clone = node.clone();
                         let idx_attr = idx.to_string();

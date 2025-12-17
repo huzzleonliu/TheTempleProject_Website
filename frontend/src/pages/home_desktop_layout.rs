@@ -2,7 +2,7 @@ use super::HomeLogic;
 use crate::components::body::{DetailPanel, OverviewColumn, PresentColumn};
 use crate::components::footer::Footer;
 use crate::components::header::Header;
-use crate::utils::types::DetailItem;
+use crate::{DetailView};
 use leptos::prelude::*;
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
         ..
     } = logic;
 
-    let (desktop_detail_items, set_desktop_detail_items) = signal(Vec::<DetailItem>::new());
+    let (desktop_detail_view, set_desktop_detail_view) = signal(DetailView::Empty);
     let (desktop_loading, set_desktop_loading) = signal(false);
     let (desktop_error, set_desktop_error) = signal(None::<String>);
 
@@ -31,12 +31,12 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
         let vm = detail_vm.get();
         set_desktop_loading.set(vm.loading);
         set_desktop_error.set(vm.error);
-        set_desktop_detail_items.set(vm.items);
+        set_desktop_detail_view.set(vm.view);
     });
 
-    let on_detail_click: Arc<dyn Fn(DetailItem) + Send + Sync> = {
+    let on_detail_click: Arc<dyn Fn(crate::UiNode) + Send + Sync> = {
         let cb = detail_click_callback.clone();
-        Arc::new(move |item: DetailItem| cb.run(item))
+        Arc::new(move |node: crate::UiNode| cb.run(node))
     };
 
     view! {
@@ -63,7 +63,7 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
                 </div>
                 <div class="col-span-5 h-full min-h-0 px-4 pt-0">
                     <DetailPanel
-                        items=desktop_detail_items
+                        view=desktop_detail_view
                         loading=desktop_loading
                         error=desktop_error
                         scroll_container_ref=detail_scroll_ref

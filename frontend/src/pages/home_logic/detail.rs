@@ -1,80 +1,28 @@
 use gloo_net::http::Request;
 use pulldown_cmark::{html, Options, Parser};
 
-use crate::utils::types::{AssetNode, DetailItem, DirectoryNode, NodeKind, UiNode};
+use crate::utils::types::{NodeKind, UiNode};
 
-pub(super) fn build_detail_items_for_path(
-    directories: &[DirectoryNode],
-    assets: &[AssetNode],
-) -> Vec<DetailItem> {
-    let mut dir_items: Vec<DetailItem> = directories
-        .iter()
-        .map(|dir| DetailItem {
-            id: dir.path.clone(),
-            label: dir.raw_filename.clone(),
-            kind: NodeKind::Directory,
-            directory_path: Some(dir.path.clone()),
-            raw_path: None,
-            has_children: dir.has_subnodes,
-            content: None,
-            display_as_entry: true,
-        })
-        .collect();
-    dir_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-
-    let mut asset_items: Vec<DetailItem> = assets
-        .iter()
-        .map(|asset| DetailItem {
-            id: asset.file_path.clone(),
-            label: asset.raw_filename.clone(),
-            kind: super::classify_asset_kind(&asset.raw_filename),
-            directory_path: None,
-            raw_path: Some(asset.raw_path.clone()),
-            has_children: false,
-            content: None,
-            display_as_entry: false,
-        })
-        .collect();
-    asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-
-    dir_items.extend(asset_items);
-    dir_items
-}
-
-pub(super) fn build_detail_items_from_nodes(nodes: &[UiNode]) -> Vec<DetailItem> {
-    let mut dir_items = Vec::new();
-    let mut asset_items = Vec::new();
+pub(super) fn build_overview_entries_from_nodes(nodes: &[UiNode]) -> Vec<UiNode> {
+    let mut dir_nodes = Vec::new();
+    let mut asset_nodes = Vec::new();
 
     for node in nodes
         .iter()
         .filter(|node| !matches!(node.kind, NodeKind::Overview))
     {
-        let item = detail_item_from_ui_node(node);
-        if matches!(item.kind, NodeKind::Directory) {
-            dir_items.push(item);
+        if matches!(node.kind, NodeKind::Directory) {
+            dir_nodes.push(node.clone());
         } else {
-            asset_items.push(item);
+            asset_nodes.push(node.clone());
         }
     }
 
-    dir_items.sort_by_key(|item| item.label.to_ascii_lowercase());
-    asset_items.sort_by_key(|item| item.label.to_ascii_lowercase());
+    dir_nodes.sort_by_key(|n| n.label.to_ascii_lowercase());
+    asset_nodes.sort_by_key(|n| n.label.to_ascii_lowercase());
 
-    dir_items.extend(asset_items);
-    dir_items
-}
-
-pub(super) fn detail_item_from_ui_node(node: &UiNode) -> DetailItem {
-    DetailItem {
-        id: node.id.clone(),
-        label: node.label.clone(),
-        kind: node.kind.clone(),
-        directory_path: node.directory_path.clone(),
-        raw_path: node.raw_path.clone(),
-        has_children: node.has_children,
-        content: None,
-        display_as_entry: matches!(node.kind, NodeKind::Directory),
-    }
+    dir_nodes.extend(asset_nodes);
+    dir_nodes
 }
 
 pub(super) async fn fetch_text_asset(path: &str) -> Result<String, String> {

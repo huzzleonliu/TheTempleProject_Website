@@ -18,14 +18,8 @@ pub fn OverviewColumn(
                 each=move || nodes.get().into_iter()
                 key=|node| node.id.clone()
                 children=move |node: UiNode| {
-                    let node_id = node.id.clone();
                     let label = node.label.clone();
-                    let detail = node
-                        .raw_path
-                        .clone()
-                        .or_else(|| node.directory_path.clone())
-                        .unwrap_or_default();
-                    let highlight_signal = highlighted_path.clone();
+                    let _highlight_signal = highlighted_path.clone();
                     let node_clone = node.clone();
 
                     view! {
