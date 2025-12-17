@@ -66,21 +66,21 @@ impl HomeLogic {
             let markdown_cache = markdown_cache.clone();
             move |_| {
                 let items = detail_items.get();
-                markdown_cache.with(|cache| {
-                    items
-                        .into_iter()
-                        .map(|mut item| {
-                            if matches!(item.kind, NodeKind::Markdown) {
-                                if let Some(path) = item.raw_path.as_ref() {
-                                    if let Some(rendered) = cache.get(path) {
-                                        item.content = Some(rendered.clone());
-                                    }
+                // IMPORTANT: use `.get()` (reactive read) so this memo recomputes when markdown_cache updates.
+                let cache = markdown_cache.get();
+                items
+                    .into_iter()
+                    .map(|mut item| {
+                        if matches!(item.kind, NodeKind::Markdown) {
+                            if let Some(path) = item.raw_path.as_ref() {
+                                if let Some(rendered) = cache.get(path) {
+                                    item.content = Some(rendered.clone());
                                 }
                             }
-                            item
-                        })
-                        .collect::<Vec<_>>()
-                })
+                        }
+                        item
+                    })
+                    .collect::<Vec<_>>()
             }
         });
 

@@ -3,7 +3,6 @@ use crate::{DetailItem, NodeKind};
 use leptos::callback::Callback;
 use leptos::prelude::*;
 use std::sync::Arc;
-use wasm_bindgen::JsValue;
 
 // NOTE: `For` 的 children 闭包要求 `Send`，因此这里的回调类型需要 `Send + Sync`。
 
@@ -16,24 +15,6 @@ pub fn DetailPanel(
     scroll_container_ref: NodeRef<leptos::html::Div>,
     #[prop(optional_no_strip)] on_node_click: Option<Arc<dyn Fn(DetailItem) + Send + Sync>>,
 ) -> impl IntoView {
-    {
-        let items = items.clone();
-        let loading = loading.clone();
-        let error = error.clone();
-        Effect::new(move |_| {
-            let snapshot = items.get();
-            let serialized = serde_json::to_string(&snapshot).unwrap_or_else(|_| "[]".to_string());
-            let loading_state = loading.get();
-            let error_state = error.get();
-            web_sys::console::log_4(
-                &JsValue::from_str("[DetailPanel]"),
-                &JsValue::from_str(&format!("loading={loading_state}")),
-                &JsValue::from_str(&format!("error={error_state:?}")),
-                &JsValue::from_str(&serialized),
-            );
-        });
-    }
-
     enum RenderState {
         Loading,
         Error(String),
@@ -282,7 +263,12 @@ fn asset_to_url(raw_path: &str) -> String {
 // ---------------- Mobile Detail Wrapper ----------------
 #[component]
 pub fn Detail(logic: HomeLogic, on_node_click: Callback<Option<String>>) -> impl IntoView {
-    let detail_items = logic.detail_items.read_only();
+    // Mobile should read from `detail_nodes` so markdown cache rendering is reflected.
+    let detail_nodes = logic.detail_nodes;
+    let (detail_items, set_detail_items) = signal(Vec::<DetailItem>::new());
+    Effect::new(move |_| {
+        set_detail_items.set(detail_nodes.get());
+    });
     let detail_loading = logic.detail_loading.read_only();
     let detail_error = logic.detail_error.read_only();
     let detail_scroll_ref = logic.detail_scroll_ref.clone();
