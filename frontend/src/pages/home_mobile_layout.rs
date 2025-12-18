@@ -7,7 +7,7 @@ use leptos::prelude::*;
 #[component]
 pub fn MobileNavigator(logic: HomeLogic) -> impl IntoView {
     let (pending_path, set_pending_path) = signal::<Option<String>>(None);
-    let navigate = logic.mobile_navigate_callback.clone();
+    let navigate = logic.actions.mobile_navigate.clone();
 
     Effect::new({
         let pending_path = pending_path.clone();
@@ -27,7 +27,7 @@ pub fn MobileNavigator(logic: HomeLogic) -> impl IntoView {
     view! {
         <div class="flex min-h-[100dvh] bg-black text-white">
             <div class="flex flex-col w-full min-h-[100dvh]">
-                <MobileHeader current_path=logic.current_path.clone() set_pending_path=set_pending_path.clone() />
+                <MobileHeader current_path=logic.state.current_path.clone() set_pending_path=set_pending_path.clone() />
                 <div class="relative flex-1 min-h-0 overflow-hidden">
                     <Detail
                         logic=logic.clone()

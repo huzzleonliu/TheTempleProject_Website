@@ -8,4 +8,3 @@ pub use utils::types::{
     NodesCache, UiNode, ROOT_PATH,
 };
 
-pub use pages::home::logic::{DetailView, DetailVm};

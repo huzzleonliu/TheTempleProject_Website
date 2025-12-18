@@ -21,12 +21,12 @@ const MOBILE_BREAKPOINT_PX: f64 = 800.0;
 #[component]
 pub fn Home() -> impl IntoView {
     let logic = HomeLogic::new();
-    let desktop_logic = logic.clone();
-    let mobile_logic = logic.clone();
+    // let desktop_logic = logic.clone();
+    // let mobile_logic = logic.clone();
     let is_mobile = use_is_mobile_flag(MOBILE_BREAKPOINT_PX);
 
     {
-        let keyboard_enabled = logic.keyboard_enabled.clone();
+        let keyboard_enabled = logic.flags.keyboard_enabled.clone();
         let is_mobile_flag = is_mobile.clone();
         Effect::new(move |_| {
             keyboard_enabled.set(!is_mobile_flag.get());
@@ -38,14 +38,15 @@ pub fn Home() -> impl IntoView {
         Effect::new(move |_| {
             if let Some(initial_path) = read_path_from_url() {
                 logic_for_url
-                    .mobile_navigate_callback
+                    .actions
+                    .mobile_navigate
                     .run(Some(initial_path));
             }
         });
     }
 
     {
-        let current_path = logic.current_path.clone();
+        let current_path = logic.state.current_path.clone();
         Effect::new(move |_| {
             sync_url_with_path(current_path.get());
         });
@@ -54,9 +55,9 @@ pub fn Home() -> impl IntoView {
     view! {
         {move || {
             if is_mobile.get() {
-                view! { <MobileNavigator logic=mobile_logic.clone() /> }.into_any()
+                view! { <MobileNavigator logic=logic.clone() /> }.into_any()
             } else {
-                view! { <DesktopLayout logic=desktop_logic.clone() /> }.into_any()
+                view! { <DesktopLayout logic=logic.clone() /> }.into_any()
             }
         }}
     }

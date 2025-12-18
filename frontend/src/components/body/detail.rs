@@ -1,7 +1,9 @@
 use crate::pages::home::HomeLogic;
-use crate::{DetailView, NodeKind, UiNode};
+use crate::{NodeKind, UiNode};
+use gloo_net::http::Request;
 use leptos::callback::Callback;
 use leptos::prelude::*;
+use pulldown_cmark::{html, Options, Parser};
 use std::sync::Arc;
 
 // NOTE: `For` 的 children 闭包要求 `Send`，因此这里的回调类型需要 `Send + Sync`。
@@ -9,148 +11,147 @@ use std::sync::Arc;
 // ---------------- Shared Detail Panel ----------------
 #[component]
 pub fn DetailPanel(
-    view: ReadSignal<DetailView>,
-    loading: ReadSignal<bool>,
-    error: ReadSignal<Option<String>>,
+    #[prop(into)] nodes: Signal<Vec<UiNode>>,
+    /// 是否属于“当前 present 目录”的 detail（此时资源应逐条 viewer 渲染）
+    #[prop(into)] is_present_dir_detail: Signal<bool>,
     scroll_container_ref: NodeRef<leptos::html::Div>,
     #[prop(optional_no_strip)] on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>,
 ) -> impl IntoView {
-    enum RenderState {
-        Loading,
-        Error(String),
-        Empty,
-        Content,
-    }
-
     view! {
         <div
             node_ref=scroll_container_ref
             class="h-full overflow-y-auto overflow-x-hidden px-2"
         >
             {move || {
-                let state = if loading.get() {
-                    RenderState::Loading
-                } else if let Some(err_msg) = error.get() {
-                    RenderState::Error(err_msg)
-                } else {
-                    match view.get() {
-                        DetailView::Empty => RenderState::Empty,
-                        DetailView::DirectoryEntries { ref entries } if entries.is_empty() => RenderState::Empty,
-                        DetailView::Overview { ref entries, .. } if entries.is_empty() => RenderState::Empty,
-                        _ => RenderState::Content,
-                    }
-                };
+                let snapshot = nodes.get();
+                if snapshot.is_empty() {
+                    return view! { <div class="text-gray-500">"暂无内容"</div> }.into_any();
+                }
 
-                let rendered: AnyView = match state {
-                    RenderState::Loading => {
-                        let message = "加载中...".to_string();
-                        view! { <div class="text-gray-500 py-4">{message}</div> }.into_any()
-                    }
-                    RenderState::Error(err_msg) => {
-                        view! { <div class="text-red-500">{err_msg}</div> }.into_any()
-                    }
-                    RenderState::Empty => {
-                        let message = "暂无内容".to_string();
-                        view! { <div class="text-gray-500">{message}</div> }.into_any()
-                    }
-                    RenderState::Content => {
-                        let on_node_click = on_node_click.clone();
-                        match view.get() {
-                            DetailView::DirectoryEntries { entries } => {
-                                view! {
-                                    <div class="space-y-3">
-                                        <For
-                                            each=move || entries.clone()
-                                            key=|node| node.id.clone()
-                                            children=move |node: UiNode| {
-                                                render_listing_entry(node, on_node_click.clone())
-                                            }
-                                        />
-                                    </div>
-                                }
-                                .into_any()
+                let on_node_click = on_node_click.clone();
+                view! {
+                    <div class="space-y-3">
+                        <For
+                            each=move || nodes.get()
+                            key=|node| node.id.clone()
+                            children=move |node: UiNode| {
+                                render_node(node, is_present_dir_detail.get(), on_node_click.clone())
                             }
-                            DetailView::Overview { entries, markdown_html } => {
-                                view! {
-                                    <div class="space-y-3">
-                                        <For
-                                            each=move || entries.clone()
-                                            key=|node| node.id.clone()
-                                            children=move |node: UiNode| {
-                                                render_overview_node(node, markdown_html.clone(), on_node_click.clone())
-                                            }
-                                        />
-                                    </div>
-                                }
-                                .into_any()
-                            }
-                            DetailView::MarkdownDoc { path, html } => {
-                                let label = path.clone();
-                                view! {
-                                    <div class="bg-gray-800 text-gray-100 px-3 py-3 space-y-2">
-                                        <div class="font-semibold text-lg">{label}</div>
-                                        <div class="prose prose-invert max-w-none text-sm leading-6" inner_html=html></div>
-                                    </div>
-                                }
-                                .into_any()
-                            }
-                            DetailView::Image { path, url } => {
-                                view! {
-                                    <div class="space-y-1">
-                                        <img src=url class="max-w-full shadow" alt=path.clone()/>
-                                        <div class="text-xs text-gray-400 break-all">{path}</div>
-                                    </div>
-                                }
-                                .into_any()
-                            }
-                            DetailView::Video { path, url } => {
-                                view! {
-                                    <div class="space-y-1">
-                                        <video src=url.clone() controls class="w-full shadow">
-                                            <track kind="captions"/>
-                                        </video>
-                                        <div class="text-xs text-gray-400 break-all">{path}</div>
-                                    </div>
-                                }
-                                .into_any()
-                            }
-                            DetailView::Pdf { path, url } => {
-                                let iframe_src = url.clone();
-                                view! {
-                                    <div class="space-y-2">
-                                        <div class="font-semibold text-lg text-gray-100">{path.clone()}</div>
-                                        <object data=url type="application/pdf" class="w-full h-[75vh] border border-gray-700 bg-gray-900">
-                                            <iframe src=iframe_src class="w-full h-full rounded" title=path.clone()></iframe>
-                                        </object>
-                                        <div class="text-xs text-gray-500 break-all">{path}</div>
-                                    </div>
-                                }
-                                .into_any()
-                            }
-                            DetailView::Other { path, url: _ } => {
-                                view! {
-                                    <div class="bg-gray-900 text-gray-200 px-3 py-2 rounded">
-                                        <div class="font-medium text-base">{path.clone()}</div>
-                                        <div class="text-xs text-gray-500 break-all">{path}</div>
-                                    </div>
-                                }
-                                .into_any()
-                            }
-                            DetailView::Empty => view! { <div class="text-gray-500">"暂无内容"</div> }.into_any(),
-                        }
-                    }
-                };
-
-                rendered
+                        />
+                    </div>
+                }
+                .into_any()
             }}
         </div>
     }
 }
 
-fn render_listing_entry(
+fn render_node(
     node: UiNode,
+    is_present_dir_detail: bool,
     on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>,
 ) -> AnyView {
+    // 核心规则（你要的）：
+    // - 如果 detail 对应当前 present 目录：资源逐条 viewer 渲染（目录仍是条目）
+    // - 如果 detail 对应子目录 listing：资源一律条目渲染（哪怕只有一条）
+    let is_resource = !matches!(node.kind, NodeKind::Directory | NodeKind::Overview);
+    let render_resource_as_viewer = is_present_dir_detail && is_resource;
+    if !render_resource_as_viewer {
+        return render_entry(node, on_node_click);
+    }
+
+    // Viewer 模式：单节点时按类型展示（Markdown 有 loading/error；其余按资源类型展示）
+    // NOTE: Directory/Overview 理论上不会作为单节点 viewer 出现，但这里仍按 entry 渲染兜底。
+    match node.kind {
+        NodeKind::Markdown => {
+            let Some(path) = node.raw_path.clone() else {
+                return view! { <div class="text-red-500 py-4">"无法定位 Markdown 文件"</div> }.into_any();
+            };
+            let label = node.label.clone();
+            view! { <MarkdownViewer label=label path=path /> }.into_any()
+        }
+        NodeKind::Image => {
+            let path = node.raw_path.clone().unwrap_or_default();
+            let src = asset_to_url(&path);
+            view! {
+                <div class="space-y-1">
+                    <img src=src class="max-w-full shadow" alt=node.label.clone()/>
+                    <div class="text-xs text-gray-400 break-all">{path}</div>
+                </div>
+            }
+            .into_any()
+        }
+        NodeKind::Video => {
+            let path = node.raw_path.clone().unwrap_or_default();
+            let src = asset_to_url(&path);
+            view! {
+                <div class="space-y-1">
+                    <video src=src.clone() controls class="w-full shadow">
+                        <track kind="captions"/>
+                    </video>
+                    <div class="text-xs text-gray-400 break-all">{path}</div>
+                </div>
+            }
+            .into_any()
+        }
+        NodeKind::Pdf => {
+            let path = node.raw_path.clone().unwrap_or_default();
+            let src = asset_to_url(&path);
+            let iframe_src = src.clone();
+            let label = node.label.clone();
+            view! {
+                <div class="space-y-2">
+                    <div class="font-semibold text-lg text-gray-100">{label.clone()}</div>
+                    <object data=src type="application/pdf" class="w-full h-[75vh] border border-gray-700 bg-gray-900">
+                        <iframe src=iframe_src class="w-full h-full rounded" title=label.clone()></iframe>
+                    </object>
+                    <div class="text-xs text-gray-500 break-all">{path}</div>
+                </div>
+            }
+            .into_any()
+        }
+        NodeKind::Other => {
+            let path = node.raw_path.clone().unwrap_or_default();
+            view! {
+                <div class="bg-gray-900 text-gray-200 px-3 py-2 rounded">
+                    <div class="font-medium text-base">{node.label.clone()}</div>
+                    <div class="text-xs text-gray-500 break-all">{path}</div>
+                </div>
+            }
+            .into_any()
+        }
+        NodeKind::Directory | NodeKind::Overview => render_entry(node, on_node_click),
+    }
+}
+
+#[component]
+fn MarkdownViewer(label: String, path: String) -> impl IntoView {
+    let md_res: LocalResource<Result<String, String>> = LocalResource::new({
+        let path = path.clone();
+        move || {
+            let path = path.clone();
+            async move {
+                let raw = fetch_text_asset(&path).await?;
+                Ok(render_markdown(&raw))
+            }
+        }
+    });
+
+    view! {
+        {move || match md_res.get() {
+            None => view! { <div class="text-gray-500 py-4">"加载中..."</div> }.into_any(),
+            Some(Err(e)) => view! { <div class="text-red-500 py-4">{e}</div> }.into_any(),
+            Some(Ok(html)) => view! {
+                <div class="bg-gray-800 text-gray-100 px-3 py-3 space-y-2">
+                    <div class="font-semibold text-lg">{label.clone()}</div>
+                    <div class="prose prose-invert max-w-none text-sm leading-6" inner_html=html></div>
+                </div>
+            }.into_any(),
+        }}
+    }
+}
+
+fn render_entry(node: UiNode, on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>) -> AnyView {
     let kind = node.kind.clone();
     let label = node.label.clone();
     let directory_path = node.directory_path.clone();
@@ -209,84 +210,26 @@ fn render_listing_entry(
     .into_any()
 }
 
-fn render_overview_node(
-    node: UiNode,
-    markdown_html: std::collections::HashMap<String, String>,
-    on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>,
-) -> AnyView {
-    if matches!(node.kind, NodeKind::Directory) {
-        return render_listing_entry(node, on_node_click);
-    }
+async fn fetch_text_asset(path: &str) -> Result<String, String> {
+    let url = asset_to_url(path);
+    Request::get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())
+}
 
-    let label = node.label.clone();
-    match node.kind {
-        NodeKind::Markdown => {
-            let path = node.raw_path.clone().unwrap_or_default();
-            let rendered = markdown_html
-                .get(&path)
-                .cloned()
-                .unwrap_or_else(|| "<p class=\"text-sm\">Markdown 渲染中...</p>".into());
-            view! {
-                <div class="bg-gray-800 text-gray-100 px-3 py-3 space-y-2">
-                    <div class="font-semibold text-lg">{label}</div>
-                    <div class="prose prose-invert max-w-none text-sm leading-6" inner_html=rendered></div>
-                </div>
-            }
-            .into_any()
-        }
-        NodeKind::Image => {
-            let path = node.raw_path.clone().unwrap_or_default();
-            let src = asset_to_url(&path);
-            view! {
-                <div class="space-y-1">
-                    <img src=src class="max-w-full shadow" alt=label.clone()/>
-                    <div class="text-xs text-gray-400 break-all">{path}</div>
-                </div>
-            }
-            .into_any()
-        }
-        NodeKind::Video => {
-            let path = node.raw_path.clone().unwrap_or_default();
-            let src = asset_to_url(&path);
-            view! {
-                <div class="space-y-1">
-                    <video src=src.clone() controls class="w-full shadow">
-                        <track kind="captions"/>
-                    </video>
-                    <div class="text-xs text-gray-400 break-all">{path}</div>
-                </div>
-            }
-            .into_any()
-        }
-        NodeKind::Pdf => {
-            let path = node.raw_path.clone().unwrap_or_default();
-            let src = asset_to_url(&path);
-            let iframe_src = src.clone();
-            view! {
-                <div class="space-y-2">
-                    <div class="font-semibold text-lg text-gray-100">{label.clone()}</div>
-                    <object data=src type="application/pdf" class="w-full h-[75vh] border border-gray-700 bg-gray-900">
-                        <iframe src=iframe_src class="w-full h-full rounded" title=label.clone()></iframe>
-                    </object>
-                    <div class="text-xs text-gray-500 break-all">{path}</div>
-                </div>
-            }
-            .into_any()
-        }
-        NodeKind::Other => {
-            let path = node.raw_path.clone().unwrap_or_default();
-            view! {
-                <div class="bg-gray-900 text-gray-200 px-3 py-2 rounded">
-                    <div class="font-medium text-base">{label}</div>
-                    <div class="text-xs text-gray-500 break-all">{path}</div>
-                </div>
-            }
-            .into_any()
-        }
-        NodeKind::Overview | NodeKind::Directory => {
-            view! { <div class="text-gray-500">"当前概览"</div> }.into_any()
-        }
-    }
+fn render_markdown(raw: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    let parser = Parser::new_ext(raw, options);
+
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
 }
 
 fn asset_to_url(raw_path: &str) -> String {
@@ -306,19 +249,9 @@ fn asset_to_url(raw_path: &str) -> String {
 // ---------------- Mobile Detail Wrapper ----------------
 #[component]
 pub fn Detail(logic: HomeLogic, on_node_click: Callback<Option<String>>) -> impl IntoView {
-    let detail_vm = logic.detail_vm;
-    let (detail_view, set_detail_view) = signal(DetailView::Empty);
-    let (detail_loading, set_detail_loading) = signal(false);
-    let (detail_error, set_detail_error) = signal(None::<String>);
-    Effect::new(move |_| {
-        let vm = detail_vm.get();
-        set_detail_view.set(vm.view);
-        set_detail_loading.set(vm.loading);
-        set_detail_error.set(vm.error);
-    });
-    let detail_scroll_ref = logic.detail_scroll_ref.clone();
+    let detail_scroll_ref = logic.refs.detail_scroll.clone();
     let pane_key = Memo::new({
-        let current_path = logic.current_path.clone();
+        let current_path = logic.state.current_path.clone();
         move |_| current_path.get().unwrap_or_else(|| "root".to_string())
     });
 
@@ -333,9 +266,8 @@ pub fn Detail(logic: HomeLogic, on_node_click: Callback<Option<String>>) -> impl
         <div class=move || format!("absolute inset-0 flex flex-col gap-4 p-4 pane-{}", pane_key.get())>
             <div class="border border-gray-800 rounded-xl overflow-hidden flex-1">
                 <DetailPanel
-                    view=detail_view
-                    loading=detail_loading
-                    error=detail_error
+                    nodes=logic.derived.detail_nodes
+                    is_present_dir_detail=logic.derived.is_present_dir_detail
                     scroll_container_ref=detail_scroll_ref
                     on_node_click=Some(detail_callback.clone())
                 />

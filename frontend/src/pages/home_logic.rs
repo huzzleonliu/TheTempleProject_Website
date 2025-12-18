@@ -1,8 +1,9 @@
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use leptos::callback::{Callback, UnsyncCallback};
+use leptos::callback::UnsyncCallback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::closure::Closure;
@@ -15,84 +16,56 @@ use crate::utils::types::{
     ROOT_PATH,
 };
 
-#[path = "home_logic/detail.rs"]
-mod detail;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum DetailKey {
-    None,
-    Overview,
-    Directory(String),
-    Markdown(String),
-    Image(String),
-    Video(String),
-    Pdf(String),
-    Other(String),
-}
-
-/// Detail 的 ViewModel：这是 UI 直接消费的数据结构（VM = ViewModel）。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DetailView {
-    Empty,
-    Overview {
-        entries: Vec<UiNode>,
-        markdown_html: HashMap<String, String>,
-    },
-    DirectoryEntries {
-        entries: Vec<UiNode>,
-    },
-    MarkdownDoc {
-        path: String,
-        html: String,
-    },
-    Image {
-        path: String,
-        url: String,
-    },
-    Video {
-        path: String,
-        url: String,
-    },
-    Pdf {
-        path: String,
-        url: String,
-    },
-    Other {
-        path: String,
-        url: String,
-    },
-}
-
-/// Detail 的 ViewModel：这是 UI 直接消费的数据结构（VM = ViewModel）。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DetailVm {
-    pub loading: bool,
-    pub error: Option<String>,
-    pub view: DetailView,
-}
-
-/// 封装 Home 页面所需的所有信号、派生数据与操作方法。
+/// Home 的核心状态：只有这两个是真正“状态”，其余都应由它们派生。
 #[derive(Clone)]
-pub struct HomeLogic {
+pub struct HomeState {
+    pub current_path: RwSignal<Option<String>>,
     pub selected_index: RwSignal<Option<usize>>,
-    pub detail_vm: Memo<DetailVm>,
+}
 
+/// Home 的派生数据：仅由 HomeState（以及内部 cache/resource）推导出来，UI 只读消费。
+#[derive(Clone)]
+pub struct HomeDerived {
     pub present_nodes: Memo<Vec<UiNode>>,
     pub overview_nodes: Memo<Vec<UiNode>>,
-    pub overview_highlight: Memo<Option<String>>,
+    pub detail_nodes: Memo<Vec<UiNode>>,
+    /// detail 是否对应当前 present 目录（此时 detail 中的资源逐条 viewer 渲染）
+    pub is_present_dir_detail: Memo<bool>,
+}
 
-    pub present_select_callback: UnsyncCallback<usize>,
-    pub present_enter_callback: UnsyncCallback<usize>,
-    pub overview_select_callback: UnsyncCallback<Option<String>>,
-    pub mobile_navigate_callback: UnsyncCallback<Option<String>>,
+/// Home 的交互入口：UI 事件只调用这些回调，不直接读写内部实现细节。
+#[derive(Clone)]
+pub struct HomeActions {
+    pub present_select: UnsyncCallback<usize>,
+    pub present_enter: UnsyncCallback<usize>,
+    pub overview_select: UnsyncCallback<Option<String>>,
+    pub mobile_navigate: UnsyncCallback<Option<String>>,
 
-    pub detail_scroll_ref: NodeRef<leptos::html::Div>,
-    pub present_scroll_ref: NodeRef<leptos::html::Div>,
+    /// Detail 的“进入/导航”回调（语义上就是 enter；旧名 detail_click_callback）
+    pub detail_enter: Arc<dyn Fn(UiNode) + Send + Sync>,
+}
 
-    pub current_path: RwSignal<Option<String>>,
+/// Home 的 DOM refs：仅用于滚动/定位，不参与业务状态。
+#[derive(Clone)]
+pub struct HomeRefs {
+    pub detail_scroll: NodeRef<leptos::html::Div>,
+    pub present_scroll: NodeRef<leptos::html::Div>,
+}
+
+/// Home 的 UI/行为开关。
+#[derive(Clone)]
+pub struct HomeFlags {
     pub keyboard_enabled: RwSignal<bool>,
+}
 
-    pub detail_click_callback: Callback<UiNode>,
+/// 封装 Home 页面所需的所有信号、派生数据与操作方法（分组后更清晰）。
+#[derive(Clone)]
+pub struct HomeLogic {
+    pub state: HomeState,
+    pub derived: HomeDerived,
+    pub actions: HomeActions,
+    pub refs: HomeRefs,
+    pub flags: HomeFlags,
 }
 
 impl HomeLogic {
@@ -101,9 +74,6 @@ impl HomeLogic {
         let assets_cache: RwSignal<AssetsCache> = RwSignal::new(HashMap::new());
         let current_path = RwSignal::new(None::<String>);
         let selected_index = RwSignal::new(None::<usize>);
-        let markdown_cache: RwSignal<HashMap<String, String>> = RwSignal::new(HashMap::new());
-        let markdown_inflight: RwSignal<HashSet<String>> = RwSignal::new(HashSet::new());
-        let detail_error = RwSignal::new(None::<String>);
         let detail_scroll_ref = NodeRef::<leptos::html::Div>::new();
         let present_scroll_ref = NodeRef::<leptos::html::Div>::new();
         let keyboard_enabled = RwSignal::new(true);
@@ -147,143 +117,6 @@ impl HomeLogic {
             }
         });
 
-        // Derived DetailKey (scaffolding; will drive Resources)
-        let detail_key = Memo::new({
-            let present_nodes = present_nodes.clone();
-            let selected_index = selected_index.clone();
-            move |_| {
-                let nodes = present_nodes.get();
-                if nodes.is_empty() {
-                    return DetailKey::None;
-                }
-
-                let idx = selected_index
-                    .get()
-                    .unwrap_or(0)
-                    .min(nodes.len().saturating_sub(1));
-                let Some(node) = nodes.get(idx) else { return DetailKey::None; };
-
-                match node.kind {
-                    NodeKind::Overview => DetailKey::Overview,
-                    NodeKind::Directory => node
-                        .directory_path
-                        .clone()
-                        .map(DetailKey::Directory)
-                        .unwrap_or(DetailKey::None),
-                    NodeKind::Markdown => node
-                        .raw_path
-                        .clone()
-                        .map(DetailKey::Markdown)
-                        .unwrap_or(DetailKey::None),
-                    NodeKind::Image => node
-                        .raw_path
-                        .clone()
-                        .map(DetailKey::Image)
-                        .unwrap_or(DetailKey::None),
-                    NodeKind::Video => node
-                        .raw_path
-                        .clone()
-                        .map(DetailKey::Video)
-                        .unwrap_or(DetailKey::None),
-                    NodeKind::Pdf => node
-                        .raw_path
-                        .clone()
-                        .map(DetailKey::Pdf)
-                        .unwrap_or(DetailKey::None),
-                    NodeKind::Other => node
-                        .raw_path
-                        .clone()
-                        .map(DetailKey::Other)
-                        .unwrap_or(DetailKey::None),
-                }
-            }
-        });
-
-        // Overview mode: list-first, then progressively fill markdown content into markdown_cache.
-        let overview_markdown_paths = Memo::new({
-            let detail_key = detail_key.clone();
-            let present_nodes = present_nodes.clone();
-            move |_| {
-                if !matches!(detail_key.get(), DetailKey::Overview) {
-                    return Vec::<String>::new();
-                }
-                present_nodes
-                    .get()
-                    .into_iter()
-                    .skip(1) // skip Overview item
-                    .filter_map(|n| {
-                        if matches!(n.kind, NodeKind::Markdown) {
-                            n.raw_path.clone()
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            }
-        });
-
-        // Drive markdown_cache fetching for Overview (dedupe via markdown_inflight).
-        {
-            let markdown_cache = markdown_cache.clone();
-            let markdown_inflight = markdown_inflight.clone();
-            let detail_error = detail_error.clone();
-            let detail_key = detail_key.clone();
-            Effect::new(move |_| {
-                if !matches!(detail_key.get(), DetailKey::Overview) {
-                    return;
-                }
-
-                let paths = overview_markdown_paths.get();
-                for path in paths {
-                    let already_cached = markdown_cache.with(|c| c.contains_key(&path));
-                    let already_inflight = markdown_inflight.with(|s| s.contains(&path));
-                    if already_cached || already_inflight {
-                        continue;
-                    }
-
-                    markdown_inflight.update(|s| {
-                        s.insert(path.clone());
-                    });
-
-                    let markdown_cache = markdown_cache.clone();
-                    let markdown_inflight = markdown_inflight.clone();
-                    let detail_error = detail_error.clone();
-                    spawn_local(async move {
-                        match detail::fetch_text_asset(&path).await {
-                            Ok(markdown) => {
-                                markdown_cache.update(|cache| {
-                                    cache.insert(path.clone(), detail::render_markdown(&markdown));
-                                });
-                            }
-                            Err(err) => {
-                                detail_error.set(Some(err));
-                            }
-                        }
-                        markdown_inflight.update(|s| {
-                            s.remove(&path);
-                        });
-                    });
-                }
-            });
-        }
-
-        // Reflect Overview loading state based on cache completeness/inflight state.
-        let overview_loading = Memo::new({
-            let detail_key = detail_key.clone();
-            let markdown_cache = markdown_cache.clone();
-            let markdown_inflight = markdown_inflight.clone();
-            move |_| {
-                if !matches!(detail_key.get(), DetailKey::Overview) {
-                    return false;
-                }
-                let paths = overview_markdown_paths.get();
-                let any_missing =
-                    markdown_cache.with(|cache| paths.iter().any(|p| !cache.contains_key(p)));
-                let any_inflight = markdown_inflight.with(|s| !s.is_empty());
-                any_missing || any_inflight
-            }
-        });
-
         let overview_nodes = Memo::new({
             let path_cache = path_cache.clone();
             let current_path = current_path.clone();
@@ -308,9 +141,37 @@ impl HomeLogic {
             }
         });
 
-        let overview_highlight = Memo::new({
+        // detail_nodes 对应的目录上下文：用于判断“是否属于当前 present 目录”
+        let detail_context_path = Memo::new({
+            let present_nodes = present_nodes.clone();
+            let selected_index = selected_index.clone();
             let current_path = current_path.clone();
-            move |_| Some(current_path.get().unwrap_or_else(|| ROOT_PATH.to_string()))
+            move |_| {
+                let nodes = present_nodes.get();
+                if nodes.is_empty() {
+                    return current_path.get();
+                }
+                let idx = selected_index
+                    .get()
+                    .unwrap_or(0)
+                    .min(nodes.len().saturating_sub(1));
+                let Some(focus) = nodes.get(idx) else { return current_path.get(); };
+                match focus.kind {
+                    NodeKind::Directory => focus.directory_path.clone(),
+                    NodeKind::Overview => current_path.get(),
+                    _ => current_path.get(),
+                }
+            }
+        });
+
+        let is_present_dir_detail = Memo::new({
+            let current_path = current_path.clone();
+            let detail_context_path = detail_context_path.clone();
+            move |_| {
+                let current = current_path.get().unwrap_or_default();
+                let ctx = detail_context_path.get().unwrap_or_default();
+                current == ctx
+            }
         });
 
         // occupy placeholder for select_index closure, defined later
@@ -494,41 +355,49 @@ impl HomeLogic {
             });
         }
 
-        // Directory entries derived async from DetailKey::Directory via LocalResource.
+        // Directory entries derived async from the focused Directory node via LocalResource.
+        let focused_directory_path = Memo::new({
+            let present_nodes = present_nodes.clone();
+            let selected_index = selected_index.clone();
+            move |_| {
+                let nodes = present_nodes.get();
+                if nodes.is_empty() {
+                    return None::<String>;
+                }
+                let idx = selected_index
+                    .get()
+                    .unwrap_or(0)
+                    .min(nodes.len().saturating_sub(1));
+                let Some(node) = nodes.get(idx) else { return None; };
+                if matches!(node.kind, NodeKind::Directory) {
+                    node.directory_path.clone()
+                } else {
+                    None
+                }
+            }
+        });
+
         let dir_entries_res: LocalResource<Result<Vec<UiNode>, String>> = {
-            let detail_key = detail_key.clone();
+            let focused_directory_path = focused_directory_path.clone();
             let path_cache = path_cache.clone();
             let assets_cache = assets_cache.clone();
             LocalResource::new(move || {
-                let key = detail_key.get();
+                let maybe_path = focused_directory_path.get();
                 let path_cache = path_cache.clone();
                 let assets_cache = assets_cache.clone();
                 async move {
-                    let DetailKey::Directory(path) = key else { return Ok(Vec::new()); };
+                    let Some(path) = maybe_path else { return Ok(Vec::new()); };
                     ensure_children(&path, path_cache.clone()).await?;
-                    let _ = ensure_assets(&path, assets_cache.clone()).await;
-                    let directories = path_cache
-                        .with(|map| map.get(&path).cloned())
-                        .unwrap_or_default();
-                    let assets = assets_cache
-                        .with(|map| map.get(&path).cloned())
-                        .unwrap_or_default();
-                    Ok(build_ui_nodes(&directories, &assets))
-                }
-            })
-        };
-
-        // Selected markdown rendered HTML derived async from DetailKey::Markdown.
-        let md_doc_res: LocalResource<Result<(String, String), String>> = {
-            let detail_key = detail_key.clone();
-            LocalResource::new(move || {
-                let key = detail_key.get();
-                async move {
-                    let DetailKey::Markdown(path) = key else {
-                        return Ok((String::new(), String::new()));
+                    if !path.is_empty() {
+                        let _ = ensure_assets(&path, assets_cache.clone()).await;
+                    }
+                    let directories = path_cache.with(|map| map.get(&path).cloned()).unwrap_or_default();
+                    let assets = if path.is_empty() {
+                        Vec::new()
+                    } else {
+                        assets_cache.with(|map| map.get(&path).cloned()).unwrap_or_default()
                     };
-                    let raw = detail::fetch_text_asset(&path).await?;
-                    Ok((path, detail::render_markdown(&raw)))
+                    Ok(build_ui_nodes(&directories, &assets))
                 }
             })
         };
@@ -707,10 +576,10 @@ impl HomeLogic {
             })
         };
 
-        // Detail 点击回调（需要 Send+Sync）：只负责把点击事件写入信号，实际导航逻辑由 HomeLogic 内部 effect 执行。
-        let detail_click_callback = {
+        // Detail 点击回调（Send+Sync）：只负责把点击事件写入信号，实际导航逻辑由 HomeLogic 内部 effect 执行。
+        let detail_enter_arc: Arc<dyn Fn(UiNode) + Send + Sync> = {
             let pending = pending_detail_click.clone();
-            Callback::new(move |node: UiNode| {
+            Arc::new(move |node: UiNode| {
                 pending.set(Some(node));
             })
         };
@@ -727,14 +596,6 @@ impl HomeLogic {
                 let Some(item) = pending.get() else { return; };
                 pending.set(None);
 
-                if !matches!(item.kind, NodeKind::Directory) {
-                    return;
-                }
-                let clicked_path = match item.directory_path.clone() {
-                    Some(p) if !p.is_empty() => p,
-                    _ => return,
-                };
-
                 let focused = selected_index
                     .get_untracked()
                     .and_then(|idx| present_nodes.get_untracked().get(idx).cloned());
@@ -742,11 +603,16 @@ impl HomeLogic {
 
                 match focused_kind {
                     Some(NodeKind::Overview) => {
-                        // 场景 2：光标在 Overview，点击 D；进入 D，光标停留在 Overview（idx=0）
-                        navigate_to(Some(clicked_path), Some(0));
+                        // 场景 2（entry-only）：光标在 Overview，点击任意条目 X；
+                        // 只在当前层把 present 的选中切到 X（detail 进入 viewer/listing）。
+                        let nodes = present_nodes.get_untracked();
+                        if let Some(idx) = nodes.iter().position(|n| n.id == item.id) {
+                            selected_index.set(Some(idx));
+                        }
                     }
                     Some(NodeKind::Directory) => {
-                        // 场景 1：光标在目录 A，点击 A 的子目录 C；进入 A，并将 C 设为选中（idx=C+1）
+                        // 场景 1（entry-only）：光标在目录 A，点击 A 的子条目 X；
+                        // 进入 A，并将 X 设为选中（idx=X+1，因为 present[0] 是 Overview）。
                         let focused_dir = focused
                             .as_ref()
                             .and_then(|n| n.directory_path.clone())
@@ -756,6 +622,7 @@ impl HomeLogic {
                         let path_cache = path_cache.clone();
                         let assets_cache = assets_cache.clone();
                         let navigate_to = navigate_to.clone();
+                        let clicked_id = item.id.clone();
 
                         spawn_local(async move {
                             if let Err(e) = ensure_children(&a_path, path_cache.clone()).await {
@@ -774,10 +641,7 @@ impl HomeLogic {
                                 .unwrap_or_default();
 
                             let ui_nodes = build_ui_nodes(&directories, &assets);
-                            let idx_in_list = ui_nodes.iter().position(|node| {
-                                matches!(node.kind, NodeKind::Directory)
-                                    && node.directory_path.as_deref() == Some(clicked_path.as_str())
-                            });
+                            let idx_in_list = ui_nodes.iter().position(|node| node.id == clicked_id);
                             let preferred = idx_in_list.map(|idx| idx + 1);
                             navigate_to(Some(a_path), preferred);
                         });
@@ -787,135 +651,59 @@ impl HomeLogic {
             });
         }
 
-        // Detail ViewModel: derived from current focus (DetailKey) and async resources/caches.
-        let detail_vm = Memo::new({
-            let detail_error = detail_error.clone();
-            let detail_key = detail_key.clone();
+        // Detail nodes: UiNode 列表（entry-only + 单文件 viewer 也用 vec![node] 表达）
+        let detail_nodes = Memo::new({
             let present_nodes = present_nodes.clone();
-            let markdown_cache = markdown_cache.clone();
+            let selected_index = selected_index.clone();
             let dir_entries_res = dir_entries_res;
-            let md_doc_res = md_doc_res;
             move |_| {
-                let key = detail_key.get();
-                let error = detail_error.get();
+                let nodes = present_nodes.get();
+                if nodes.is_empty() {
+                    return Vec::<UiNode>::new();
+                }
+                let idx = selected_index
+                    .get()
+                    .unwrap_or(0)
+                    .min(nodes.len().saturating_sub(1));
+                let Some(focus) = nodes.get(idx).cloned() else { return Vec::new(); };
 
-                match key {
-                    DetailKey::None => DetailVm {
-                        loading: false,
-                        error: None,
-                        view: DetailView::Empty,
+                match focus.kind {
+                    NodeKind::Overview => nodes.into_iter().skip(1).collect(),
+                    NodeKind::Directory => match dir_entries_res.get() {
+                        Some(Ok(entries)) => entries,
+                        _ => Vec::new(),
                     },
-                    DetailKey::Overview => {
-                        let nodes = present_nodes.get();
-                        let slice = nodes.into_iter().skip(1).collect::<Vec<_>>();
-                        let entries = detail::build_overview_entries_from_nodes(&slice);
-                        let markdown_html = markdown_cache.get();
-                        DetailVm {
-                            loading: overview_loading.get(),
-                            error,
-                            view: DetailView::Overview {
-                                entries,
-                                markdown_html,
-                            },
-                        }
-                    }
-                    DetailKey::Directory(_path) => {
-                        let maybe = dir_entries_res.get();
-                        let loading = maybe.is_none();
-                        match maybe {
-                            None => DetailVm {
-                                loading: true,
-                                error: None,
-                                view: DetailView::DirectoryEntries { entries: Vec::new() },
-                            },
-                            Some(Ok(entries)) => DetailVm {
-                                loading,
-                                error: None,
-                                view: DetailView::DirectoryEntries { entries },
-                            },
-                            Some(Err(e)) => DetailVm {
-                                loading: false,
-                                error: Some(e),
-                                view: DetailView::DirectoryEntries { entries: Vec::new() },
-                            },
-                        }
-                    }
-                    DetailKey::Markdown(path) => {
-                        let maybe = md_doc_res.get();
-                        let loading = maybe.is_none();
-                        match maybe {
-                            None => DetailVm {
-                                loading: true,
-                                error: None,
-                                view: DetailView::MarkdownDoc { path, html: String::new() },
-                            },
-                            Some(Ok((p, html))) if p == path => DetailVm {
-                                loading,
-                                error: None,
-                                view: DetailView::MarkdownDoc { path, html },
-                            },
-                            Some(Ok((_p, _html))) => DetailVm {
-                                loading: true,
-                                error: None,
-                                view: DetailView::MarkdownDoc { path, html: String::new() },
-                            },
-                            Some(Err(e)) => DetailVm {
-                                loading: false,
-                                error: Some(e),
-                                view: DetailView::MarkdownDoc { path, html: String::new() },
-                            },
-                        }
-                    }
-                    DetailKey::Image(path) => {
-                        let url = asset_to_url(&path);
-                        DetailVm { loading: false, error: None, view: DetailView::Image { path, url } }
-                    }
-                    DetailKey::Video(path) => {
-                        let url = asset_to_url(&path);
-                        DetailVm { loading: false, error: None, view: DetailView::Video { path, url } }
-                    }
-                    DetailKey::Pdf(path) => {
-                        let url = asset_to_url(&path);
-                        DetailVm { loading: false, error: None, view: DetailView::Pdf { path, url } }
-                    }
-                    DetailKey::Other(path) => {
-                        let url = asset_to_url(&path);
-                        DetailVm { loading: false, error: None, view: DetailView::Other { path, url } }
-                    }
+                    _ => vec![focus],
                 }
             }
         });
 
         HomeLogic {
-            selected_index,
-            detail_vm,
-            present_nodes,
-            overview_nodes,
-            overview_highlight,
-            present_select_callback,
-            present_enter_callback,
-            overview_select_callback,
-            mobile_navigate_callback,
-            detail_scroll_ref,
-            present_scroll_ref,
-            current_path,
-            keyboard_enabled,
-            detail_click_callback,
+            state: HomeState {
+                current_path: current_path.clone(),
+                selected_index: selected_index.clone(),
+            },
+            derived: HomeDerived {
+                present_nodes: present_nodes.clone(),
+                overview_nodes: overview_nodes.clone(),
+                detail_nodes,
+                is_present_dir_detail,
+            },
+            actions: HomeActions {
+                present_select: present_select_callback,
+                present_enter: present_enter_callback,
+                overview_select: overview_select_callback,
+                mobile_navigate: mobile_navigate_callback,
+                detail_enter: detail_enter_arc,
+            },
+            refs: HomeRefs {
+                detail_scroll: detail_scroll_ref,
+                present_scroll: present_scroll_ref,
+            },
+            flags: HomeFlags {
+                keyboard_enabled,
+            },
         }
-    }
-}
-
-fn asset_to_url(raw_path: &str) -> String {
-    let normalized = raw_path.replace('\\', "/");
-    if normalized.starts_with("http://") || normalized.starts_with("https://") {
-        normalized
-    } else {
-        let trimmed = normalized.trim_start_matches('/');
-        let origin = web_sys::window()
-            .and_then(|w| w.location().origin().ok())
-            .unwrap_or_else(|| "".to_string());
-        let base = origin.trim_end_matches('/');
-        format!("{}/resource/{}", base, trimmed)
     }
 }
 
