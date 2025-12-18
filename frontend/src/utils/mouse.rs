@@ -268,3 +268,21 @@ pub fn handle_overview_a_click(
         set_overview_a_directories.set(Vec::new());
     }
 }
+
+/// 将 present 列表当前选中的条目滚动到可视区域（用于键盘/鼠标选择变化时的 UI 体验）。
+pub fn scroll_selected_into_view(
+    container_ref: &NodeRef<leptos::html::Div>,
+    index: Option<usize>,
+) {
+    if let Some(idx) = index {
+        if let Some(container) = container_ref.get() {
+            if let Some(element) = container.dyn_ref::<web_sys::Element>().and_then(|el| {
+                el.query_selector(&format!(r#"[data-index="{}"]"#, idx))
+                    .ok()
+                    .flatten()
+            }) {
+                element.scroll_into_view_with_bool(false);
+            }
+        }
+    }
+}

@@ -14,6 +14,7 @@ use urlencoding::encode;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
+use crate::pages::home::logic::navigate_to;
 
 const MOBILE_BREAKPOINT_PX: f64 = 800.0;
 
@@ -21,32 +22,19 @@ const MOBILE_BREAKPOINT_PX: f64 = 800.0;
 #[component]
 pub fn Home() -> impl IntoView {
     let logic = HomeLogic::new();
-    // let desktop_logic = logic.clone();
-    // let mobile_logic = logic.clone();
     let is_mobile = use_is_mobile_flag(MOBILE_BREAKPOINT_PX);
-
-    {
-        let keyboard_enabled = logic.flags.keyboard_enabled.clone();
-        let is_mobile_flag = is_mobile.clone();
-        Effect::new(move |_| {
-            keyboard_enabled.set(!is_mobile_flag.get());
-        });
-    }
 
     {
         let logic_for_url = logic.clone();
         Effect::new(move |_| {
             if let Some(initial_path) = read_path_from_url() {
-                logic_for_url
-                    .actions
-                    .mobile_navigate
-                    .run(Some(initial_path));
+                navigate_to(&logic_for_url, Some(initial_path), None);
             }
         });
     }
 
     {
-        let current_path = logic.state.current_path.clone();
+        let current_path = logic.current_path.clone();
         Effect::new(move |_| {
             sync_url_with_path(current_path.get());
         });

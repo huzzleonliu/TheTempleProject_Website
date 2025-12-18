@@ -10,14 +10,14 @@ use crate::utils::ButtonIconMatcher;
 pub fn OverviewColumn(
     nodes: Memo<Vec<UiNode>>,
     #[prop(into)] current_path: Signal<Option<String>>,
-    #[prop(into)] on_select: UnsyncCallback<Option<String>>,
+    #[prop(into)] on_enter: UnsyncCallback<usize>,
 ) -> impl IntoView {
     view! {
         <ul class="h-full overflow-y-auto flex flex-col gap-1 py-1">
             <For
-                each=move || nodes.get().into_iter()
-                key=|node| node.id.clone()
-                children=move |node: UiNode| {
+                each=move || nodes.get().into_iter().enumerate()
+                key=|(idx, node)| format!("{}:{}", idx, node.id)
+                children=move |(idx, node): (usize, UiNode)| {
                     let label = node.label.clone();
                     let node_clone = node.clone();
                     let is_selected = Memo::new({
@@ -37,10 +37,7 @@ pub fn OverviewColumn(
                                 }
                                 on:click=move |_| {
                                     if matches!(node_clone.kind, NodeKind::Directory) {
-                                        match node_clone.directory_path.as_deref() {
-                                            Some("") | None => on_select.run(None),
-                                            Some(path) => on_select.run(Some(path.to_string())),
-                                        }
+                                        on_enter.run(idx);
                                     }
                                 }
                             >

@@ -1,10 +1,9 @@
-use crate::pages::home::HomeLogic;
+use crate::pages::home::logic::DetailMode;
 use crate::{NodeKind, UiNode};
 use gloo_net::http::Request;
-use leptos::callback::Callback;
+use leptos::callback::UnsyncCallback;
 use leptos::prelude::*;
 use pulldown_cmark::{html, Options, Parser};
-use std::sync::Arc;
 
 // NOTE: `For` 的 children 闭包要求 `Send`，因此这里的回调类型需要 `Send + Sync`。
 
@@ -12,10 +11,9 @@ use std::sync::Arc;
 #[component]
 pub fn DetailPanel(
     #[prop(into)] nodes: Signal<Vec<UiNode>>,
-    /// 是否属于“当前 present 目录”的 detail（此时资源应逐条 viewer 渲染）
-    #[prop(into)] is_present_dir_detail: Signal<bool>,
+    #[prop(into)] detail_render_mode: Signal<DetailMode>,
+    #[prop(into)] on_enter: UnsyncCallback<usize>,
     scroll_container_ref: NodeRef<leptos::html::Div>,
-    #[prop(optional_no_strip)] on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>,
 ) -> impl IntoView {
     view! {
         <div
@@ -28,14 +26,14 @@ pub fn DetailPanel(
                     return view! { <div class="text-gray-500">"暂无内容"</div> }.into_any();
                 }
 
-                let on_node_click = on_node_click.clone();
+                let mode = detail_render_mode.get();
                 view! {
                     <div class="space-y-3">
                         <For
-                            each=move || nodes.get()
-                            key=|node| node.id.clone()
-                            children=move |node: UiNode| {
-                                render_node(node, is_present_dir_detail.get(), on_node_click.clone())
+                            each=move || nodes.get().into_iter().enumerate()
+                            key=|(idx, node)| format!("{}:{}", idx, node.id)
+                            children=move |(idx, node): (usize, UiNode)| {
+                                render_node(idx, node, mode, on_enter.clone())
                             }
                         />
                     </div>
@@ -47,17 +45,18 @@ pub fn DetailPanel(
 }
 
 fn render_node(
+    idx: usize,
     node: UiNode,
-    is_present_dir_detail: bool,
-    on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>,
+    mode: DetailMode,
+    on_enter: UnsyncCallback<usize>,
 ) -> AnyView {
     // 核心规则（你要的）：
     // - 如果 detail 对应当前 present 目录：资源逐条 viewer 渲染（目录仍是条目）
     // - 如果 detail 对应子目录 listing：资源一律条目渲染（哪怕只有一条）
     let is_resource = !matches!(node.kind, NodeKind::Directory | NodeKind::Overview);
-    let render_resource_as_viewer = is_present_dir_detail && is_resource;
+    let render_resource_as_viewer = matches!(mode, DetailMode::Resources) && is_resource;
     if !render_resource_as_viewer {
-        return render_entry(node, on_node_click);
+        return render_entry(idx, node, on_enter);
     }
 
     // Viewer 模式：单节点时按类型展示（Markdown 有 loading/error；其余按资源类型展示）
@@ -120,7 +119,7 @@ fn render_node(
             }
             .into_any()
         }
-        NodeKind::Directory | NodeKind::Overview => render_entry(node, on_node_click),
+        NodeKind::Directory | NodeKind::Overview => render_entry(idx, node, on_enter),
     }
 }
 
@@ -151,7 +150,7 @@ fn MarkdownViewer(label: String, path: String) -> impl IntoView {
     }
 }
 
-fn render_entry(node: UiNode, on_node_click: Option<Arc<dyn Fn(UiNode) + Send + Sync>>) -> AnyView {
+fn render_entry(idx: usize, node: UiNode, on_enter: UnsyncCallback<usize>) -> AnyView {
     let kind = node.kind.clone();
     let label = node.label.clone();
     let directory_path = node.directory_path.clone();
@@ -188,12 +187,11 @@ fn render_entry(node: UiNode, on_node_click: Option<Arc<dyn Fn(UiNode) + Send + 
         }
     };
 
-    if let Some(callback) = on_node_click {
-        let node_clone = node.clone();
+    if matches!(kind, NodeKind::Directory) {
         return view! {
             <div class="w-full min-w-0">
                 <button class="w-full text-left" on:click=move |_| {
-                    callback(node_clone.clone());
+                    on_enter.run(idx);
                 }>
                     {inner()}
                 </button>
@@ -243,35 +241,5 @@ fn asset_to_url(raw_path: &str) -> String {
             .unwrap_or_else(|| "".to_string());
         let base = origin.trim_end_matches('/');
         format!("{}/resource/{}", base, trimmed)
-    }
-}
-
-// ---------------- Mobile Detail Wrapper ----------------
-#[component]
-pub fn Detail(logic: HomeLogic, on_node_click: Callback<Option<String>>) -> impl IntoView {
-    let detail_scroll_ref = logic.refs.detail_scroll.clone();
-    let pane_key = Memo::new({
-        let current_path = logic.state.current_path.clone();
-        move |_| current_path.get().unwrap_or_else(|| "root".to_string())
-    });
-
-    let detail_callback: Arc<dyn Fn(UiNode) + Send + Sync> = {
-        let handler = on_node_click.clone();
-        Arc::new(move |node: UiNode| {
-            handler.run(node.directory_path.clone());
-        })
-    };
-
-    view! {
-        <div class=move || format!("absolute inset-0 flex flex-col gap-4 p-4 pane-{}", pane_key.get())>
-            <div class="border border-gray-800 rounded-xl overflow-hidden flex-1">
-                <DetailPanel
-                    nodes=logic.derived.detail_nodes
-                    is_present_dir_detail=logic.derived.is_present_dir_detail
-                    scroll_container_ref=detail_scroll_ref
-                    on_node_click=Some(detail_callback.clone())
-                />
-            </div>
-        </div>
     }
 }

@@ -1,5 +1,8 @@
 use leptos::prelude::*;
+use std::cell::Cell;
 use std::rc::Rc;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 
 /// 处理键盘导航事件
 pub fn handle_keyboard_navigation(
@@ -53,6 +56,59 @@ pub fn handle_keyboard_navigation(
         "h" => go_back(),
         _ => {}
     }
+}
+
+/// 安装全局键盘监听（j/k/l/h + shift+j/k）并桥接到 `handle_keyboard_navigation`。
+///
+/// 说明：此函数内部用 `Effect` 确保同一个组件实例只安装一次监听。
+pub fn install_keyboard_listener(
+    move_selection: Rc<dyn Fn(i32)>,
+    enter_selection: Rc<dyn Fn()>,
+    go_back: Rc<dyn Fn()>,
+    detail_scroll_ref: NodeRef<leptos::html::Div>,
+    present_scroll_ref: NodeRef<leptos::html::Div>,
+) {
+    let installed = Rc::new(Cell::new(false));
+    Effect::new(move |_| {
+        if installed.get() {
+            return;
+        }
+        installed.set(true);
+
+        let move_selection = move_selection.clone();
+        let enter_selection = enter_selection.clone();
+        let go_back = go_back.clone();
+
+        let handle_global_keydown = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            // 避免输入框抢占快捷键
+            if let Some(active) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+            {
+                let tag = active.tag_name();
+                if matches!(tag.as_str(), "INPUT" | "TEXTAREA") || active.has_attribute("contenteditable") {
+                    return;
+                }
+            }
+
+            handle_keyboard_navigation(
+                &event,
+                move_selection.clone(),
+                enter_selection.clone(),
+                go_back.clone(),
+                detail_scroll_ref.clone(),
+                present_scroll_ref.clone(),
+            );
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        if let Some(window) = web_sys::window() {
+            let _ = window.add_event_listener_with_callback(
+                "keydown",
+                handle_global_keydown.as_ref().unchecked_ref(),
+            );
+        }
+        handle_global_keydown.forget();
+    });
 }
 
 fn scroll_detail(detail_scroll_ref: &NodeRef<leptos::html::Div>, delta: f64) {
