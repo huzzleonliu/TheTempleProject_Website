@@ -1,8 +1,8 @@
-mod font_loader;
-mod main_window;
+mod layout;
+mod logic;
 mod utils;
 
-use main_window::MainWindow;
+use layout::MainWindow;
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
@@ -14,7 +14,7 @@ fn main() -> Result<(), eframe::Error> {
         "Image Viewer",
         options,
         Box::new(|cc| {
-            font_loader::configure_fonts(&cc.egui_ctx);
+            layout::configure_fonts(&cc.egui_ctx);
             Ok(Box::new(MainWindow::default()))
         }),
     )

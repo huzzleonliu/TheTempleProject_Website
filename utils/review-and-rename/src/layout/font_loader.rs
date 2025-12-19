@@ -116,3 +116,5 @@ fn push_platform_candidates(list: &mut Vec<PathBuf>) {
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn push_platform_candidates(_list: &mut Vec<PathBuf>) {}
+
+

@@ -1,9 +1,9 @@
-use crate::utils::{load_texture_from_image, UiUtils};
+use crate::utils::{load_texture_from_image, show_image_browser, ImageViewState};
+use crate::logic::{rename_in_order, RenamableEntry};
 use docx_lite;
 use egui;
 use egui_dnd::dnd;
 use pdf_extract;
-use std::collections::HashSet;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
@@ -34,6 +34,7 @@ pub struct MainWindow {
     next_id: u64,
     rename_start_value: usize,
     rename_start_input: String,
+    image_view: ImageViewState,
 }
 
 impl Default for MainWindow {
@@ -46,6 +47,7 @@ impl Default for MainWindow {
             next_id: 0,
             rename_start_value: 1,
             rename_start_input: "1".to_string(),
+            image_view: ImageViewState::default(),
         }
     }
 }
@@ -238,15 +240,26 @@ impl MainWindow {
         ui.separator();
         if let Some(selected_idx) = self.selected_index() {
             self.ensure_preview_loaded(ctx, selected_idx);
-            if let Some(entry) = self.files.get(selected_idx) {
-                ui.label(format!("文件名: {}", entry.file_name));
-                ui.label(format!("类型: {}", entry.file_type.display_name()));
-                ui.label(format!("路径: {}", entry.path.display()));
+            if selected_idx < self.files.len() {
+                // 先把要显示的基础信息 clone 出来，避免在后续调用中触发借用冲突
+                let (file_name, file_type, file_path) = {
+                    let entry = &self.files[selected_idx];
+                    (
+                        entry.file_name.clone(),
+                        entry.file_type.clone(),
+                        entry.path.display().to_string(),
+                    )
+                };
+
+                ui.label(format!("文件名: {}", file_name));
+                ui.label(format!("类型: {}", file_type.display_name()));
+                ui.label(format!("路径: {}", file_path));
                 ui.separator();
-                match entry.file_type {
-                    FileType::Image => self.render_image_preview(ui, entry),
+
+                match file_type {
+                    FileType::Image => self.render_image_preview(ui, selected_idx),
                     FileType::Text | FileType::Pdf | FileType::Docx => {
-                        self.render_text_preview(ui, entry)
+                        self.render_text_preview(ui, &self.files[selected_idx])
                     }
                     FileType::Unsupported(_) => {
                         ui.label("暂不支持该类型的内容预览。");
@@ -258,34 +271,23 @@ impl MainWindow {
         }
     }
 
-    /// 图片预览（自动缩放以适配区域）
-    fn render_image_preview(&self, ui: &mut egui::Ui, entry: &FileEntry) {
+    /// 图片预览（支持缩放/拖拽；首次加载自动适应屏幕）
+    fn render_image_preview(&mut self, ui: &mut egui::Ui, index: usize) {
+        let Some(entry) = self.files.get(index) else {
+            ui.label("未找到要预览的文件。");
+            return;
+        };
         if let Some(err) = &entry.preview_error {
             ui.label(format!("预览失败: {}", err));
             return;
         }
 
         if let Some(texture) = &entry.texture {
-            egui::ScrollArea::both()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    UiUtils::draw_checkerboard_background(ui);
-                    ui.add(
-                        egui::Image::from_texture(texture)
-                            .fit_to_original_size(1.0)
-                            .texture_options(egui::TextureOptions {
-                                magnification: egui::TextureFilter::Nearest,
-                                minification: egui::TextureFilter::Nearest,
-                                ..Default::default()
-                            }),
-                    );
-                });
+            show_image_browser(ui, texture, &mut self.image_view, entry.id);
+        } else if entry.preview_loaded {
+            ui.label("暂无可以显示的图片预览。");
         } else {
-            if entry.preview_loaded {
-                ui.label("暂无可以显示的图片预览。");
-            } else {
-                ui.label("正在加载图片预览…");
-            }
+            ui.label("正在加载图片预览…");
         }
     }
 
@@ -299,12 +301,10 @@ impl MainWindow {
                 .show(ui, |ui| {
                     ui.monospace(text);
                 });
+        } else if entry.preview_loaded {
+            ui.label("暂无可以显示的文本内容。");
         } else {
-            if entry.preview_loaded {
-                ui.label("暂无可以显示的文本内容。");
-            } else {
-                ui.label("正在加载文本预览…");
-            }
+            ui.label("正在加载文本预览…");
         }
     }
 
@@ -327,7 +327,6 @@ impl MainWindow {
         let start_time = Instant::now();
         let msg = format!("开始加载目录: {}", dir.display());
         log_message(&msg);
-
         let mut entries = Vec::new();
         let dir_iter = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
         let mut next_id = 0_u64;
@@ -345,13 +344,14 @@ impl MainWindow {
                 continue;
             };
 
-            let file_name = path
+            let Some(file_name) = path
                 .file_name()
                 .and_then(|s| s.to_str())
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| String::from("unknown"));
-            let msg = format!("处理文件: {}", file_name);
-            log_message(&msg);
+            else {
+                continue;
+            };
+            log_message(&format!("处理文件: {}", file_name));
 
             entries.push(FileEntry {
                 id: {
@@ -383,12 +383,11 @@ impl MainWindow {
         self.status_message = Some(message);
 
         let elapsed = start_time.elapsed();
-        let msg = format!(
+        log_message(&format!(
             "目录索引完成，共 {} 个文件，耗时 {:.2?}",
             self.files.len(),
             elapsed
-        );
-        log_message(&msg);
+        ));
         Ok(())
     }
 
@@ -424,11 +423,7 @@ impl MainWindow {
 
         let (path, file_name, file_type) = {
             let entry = &self.files[index];
-            (
-                entry.path.clone(),
-                entry.file_name.clone(),
-                entry.file_type.clone(),
-            )
+            (entry.path.clone(), entry.file_name.clone(), entry.file_type.clone())
         };
 
         log_message(&format!("开始加载预览: {}", file_name));
@@ -484,13 +479,12 @@ impl MainWindow {
                 log_message(&format!("预览加载失败: {} -> {}", file_name, err));
                 self.status_message = Some(format!("预览失败: {}", err));
             }
-        }
+        };
     }
 
     /// 文本预览：读取前若干字符
     fn read_text_preview(path: &Path) -> Result<String, String> {
-        let msg = format!("读取文本预览: {}", path.display());
-        log_message(&msg);
+        log_message(&format!("读取文本预览: {}", path.display()));
         let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         let mut buffer = Vec::with_capacity(MAX_PREVIEW_BYTES);
         std::io::Read::by_ref(&mut file)
@@ -498,35 +492,30 @@ impl MainWindow {
             .read_to_end(&mut buffer)
             .map_err(|e| e.to_string())?;
         let text = String::from_utf8_lossy(&buffer).to_string();
-        let msg = format!("文本预览成功，长度 {}", text.len());
-        log_message(&msg);
+        log_message(&format!("文本预览成功，长度 {}", text.len()));
         Ok(Self::truncate_preview(text))
     }
 
     fn read_pdf_preview(path: &Path) -> Result<String, String> {
-        let msg = format!("读取 PDF 预览: {}", path.display());
-        log_message(&msg);
+        log_message(&format!("读取 PDF 预览: {}", path.display()));
         let text = pdf_extract::extract_text(path).map_err(|e| e.to_string())?;
         if text.trim().is_empty() {
             log_message("PDF 预览为空文本");
             Ok(String::from("（PDF 不包含可提取的文本内容）"))
         } else {
-            let msg = format!("PDF 预览成功，原始长度 {}", text.len());
-            log_message(&msg);
+            log_message(&format!("PDF 预览成功，原始长度 {}", text.len()));
             Ok(Self::truncate_preview(text))
         }
     }
 
     fn read_docx_preview(path: &Path) -> Result<String, String> {
-        let msg = format!("读取 DOCX 预览: {}", path.display());
-        log_message(&msg);
+        log_message(&format!("读取 DOCX 预览: {}", path.display()));
         let text = docx_lite::extract_text(path).map_err(|e| e.to_string())?;
         if text.trim().is_empty() {
             log_message("DOCX 预览为空文本");
             Ok(String::from("（DOCX 文件没有可展示的文本内容）"))
         } else {
-            let msg = format!("DOCX 预览成功，原始长度 {}", text.len());
-            log_message(&msg);
+            log_message(&format!("DOCX 预览成功，原始长度 {}", text.len()));
             Ok(Self::truncate_preview(text))
         }
     }
@@ -572,10 +561,6 @@ impl MainWindow {
             return Err("没有可重命名的文件".to_string());
         }
 
-        let mut final_paths = Vec::with_capacity(self.files.len());
-        let originals: HashSet<PathBuf> =
-            self.files.iter().map(|entry| entry.path.clone()).collect();
-
         let file_count = self.files.len();
         let start_number = self.rename_start_value.max(1);
         let max_number = start_number.saturating_add(file_count.saturating_sub(1));
@@ -585,50 +570,7 @@ impl MainWindow {
             start_number, file_count, width
         ));
 
-        for (idx, entry) in self.files.iter().enumerate() {
-            let ext = entry
-                .path
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-
-            let current_number = start_number.saturating_add(idx);
-            let stem = format!("{:0width$}", current_number, width = width);
-
-            let new_name = if ext.is_empty() {
-                stem.clone()
-            } else {
-                format!("{}.{}", stem, ext)
-            };
-
-            let final_path = dir.join(&new_name);
-            if final_path.exists() && !originals.contains(&final_path) {
-                let msg = format!("重命名目标已存在: {}", final_path.display());
-                log_message(&msg);
-                return Err(format!("目标文件已存在: {}", final_path.display()));
-            }
-
-            final_paths.push((idx, final_path, new_name));
-        }
-
-        // 第一步：全部改为唯一的临时文件名
-        for (idx, entry) in self.files.iter_mut().enumerate() {
-            let temp_name = format!("__tmp_order_{:04}_{}", idx, entry.file_name);
-            let temp_path = dir.join(&temp_name);
-            fs::rename(&entry.path, &temp_path)
-                .map_err(|e| format!("重命名临时文件失败: {}", e))?;
-            entry.path = temp_path;
-            entry.file_name = temp_name;
-        }
-
-        // 第二步：按顺序命名为起始值递增的序号
-        for (idx, final_path, new_name) in final_paths {
-            fs::rename(&self.files[idx].path, &final_path)
-                .map_err(|e| format!("最终重命名失败: {}", e))?;
-            self.files[idx].path = final_path;
-            self.files[idx].file_name = new_name;
-        }
+        rename_in_order(dir.as_path(), &mut self.files, start_number)?;
 
         let summary = format!(
             "已按顺序重命名 {} 个文件（起始值 {}）",
@@ -685,6 +627,24 @@ struct FileEntry {
     preview_error: Option<String>,
 }
 
+impl RenamableEntry for FileEntry {
+    fn path(&self) -> &Path {
+        self.path.as_path()
+    }
+
+    fn file_name(&self) -> &str {
+        self.file_name.as_str()
+    }
+
+    fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
+    fn set_file_name(&mut self, name: String) {
+        self.file_name = name;
+    }
+}
+
 impl PartialEq for FileEntry {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -698,3 +658,5 @@ impl Hash for FileEntry {
         self.id.hash(state);
     }
 }
+
+
