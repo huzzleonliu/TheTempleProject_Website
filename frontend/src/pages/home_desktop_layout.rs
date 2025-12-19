@@ -91,7 +91,7 @@ pub fn DesktopLayout(logic: HomeLogic) -> impl IntoView {
                 <Header/>
             </div>
             <div class="grid grid-cols-10 grid-rows-1 flex-1 min-h-0 overflow-hidden items-start">
-                <div class="col-span-2 overflow-y-auto px-4 pt-0">
+                <div class="col-span-2 h-full min-h-0 px-4 pt-0">
                     <OverviewColumn
                         nodes=logic.overview_nodes
                         current_path=logic.current_path.read_only()

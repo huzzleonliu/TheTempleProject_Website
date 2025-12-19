@@ -14,7 +14,8 @@ pulldown-cmark = { version = "0.13.0", default-features = false, features = ["ht
 reqwest = "0.12.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+send_wrapper = "0.6.0"
 urlencoding = "2.1"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "HtmlElement", "Location", "Storage", "Navigator"] }
+web-sys = { version = "0.3", features = ["Window", "HtmlElement", "HtmlDivElement", "Element", "DomRect", "DomRectReadOnly", "Location", "Storage", "Navigator"] }
 

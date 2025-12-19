@@ -3,6 +3,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+use send_wrapper::SendWrapper;
 
 /// 处理键盘导航事件
 pub fn handle_keyboard_navigation(
@@ -11,7 +12,7 @@ pub fn handle_keyboard_navigation(
     enter_selection: Rc<dyn Fn()>,
     go_back: Rc<dyn Fn()>,
     detail_scroll_ref: NodeRef<leptos::html::Div>,
-    present_scroll_ref: NodeRef<leptos::html::Div>,
+    _present_scroll_ref: NodeRef<leptos::html::Div>,
 ) {
     let key = event.key();
     let shift_pressed = event.shift_key();
@@ -46,11 +47,9 @@ pub fn handle_keyboard_navigation(
     match key.as_str() {
         "j" => {
             move_selection(1);
-            scroll_present(&present_scroll_ref, 1);
         }
         "k" => {
             move_selection(-1);
-            scroll_present(&present_scroll_ref, -1);
         }
         "l" => enter_selection(),
         "h" => go_back(),
@@ -101,13 +100,24 @@ pub fn install_keyboard_listener(
             );
         }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
-        if let Some(window) = web_sys::window() {
-            let _ = window.add_event_listener_with_callback(
+        let Some(window) = web_sys::window() else { return; };
+
+        // 用 SendWrapper 包一层，满足 `on_cleanup` 对 `Send + Sync` 的要求（Wasm 单线程环境下这是安全的）。
+        let window = SendWrapper::new(window);
+        let handle_global_keydown = SendWrapper::new(handle_global_keydown);
+
+        let _ = window.add_event_listener_with_callback(
+            "keydown",
+            (&*handle_global_keydown).as_ref().unchecked_ref(),
+        );
+
+        // 关键：不要 `forget()`，否则监听器会永久泄漏，导致多次挂载后按一次键触发多次回调（表现为跳两格）。
+        on_cleanup(move || {
+            let _ = window.remove_event_listener_with_callback(
                 "keydown",
-                handle_global_keydown.as_ref().unchecked_ref(),
+                (&*handle_global_keydown).as_ref().unchecked_ref(),
             );
-        }
-        handle_global_keydown.forget();
+        });
     });
 }
 
@@ -117,16 +127,5 @@ fn scroll_detail(detail_scroll_ref: &NodeRef<leptos::html::Div>, delta: f64) {
         let max_scroll = (container.scroll_height() - container.client_height()) as f64;
         let new_scroll = (current_scroll + delta).clamp(0.0, max_scroll);
         container.set_scroll_top(new_scroll as i32);
-    }
-}
-
-fn scroll_present(present_ref: &NodeRef<leptos::html::Div>, direction: i32) {
-    if let Some(container) = present_ref.get() {
-        let current_scroll = container.scroll_top();
-        let line_height = 40; // approximate line height for list items
-        let delta = direction * line_height;
-        let max_scroll = container.scroll_height() - container.client_height();
-        let new_scroll = (current_scroll + delta).clamp(0, max_scroll);
-        container.set_scroll_top(new_scroll);
     }
 }

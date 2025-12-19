@@ -281,7 +281,33 @@ pub fn scroll_selected_into_view(
                     .ok()
                     .flatten()
             }) {
-                element.scroll_into_view_with_bool(false);
+                // 目标体验：滚动条尽量不动；只有当选中项接近顶部/底部时才微调滚动位置。
+                // 用 bounding rect 计算“选中项是否在可视区域内”，并按阈值做最小滚动。
+                let container_el: web_sys::Element = container.clone().unchecked_into();
+                let item_el: web_sys::Element = element.clone();
+
+                let container_rect = container_el.get_bounding_client_rect();
+                let item_rect = item_el.get_bounding_client_rect();
+
+                let padding = 72.0; // 距离顶部/底部多近才开始滚动（px）
+                let view_top = container_rect.top() + padding;
+                let view_bottom = container_rect.bottom() - padding;
+
+                let current_scroll = container.scroll_top() as f64;
+                let max_scroll =
+                    (container.scroll_height() - container.client_height()).max(0) as f64;
+
+                if item_rect.top() < view_top {
+                    // 向上：仅把条目拉回到 view_top 位置附近
+                    let delta = item_rect.top() - view_top;
+                    let new_scroll = (current_scroll + delta).clamp(0.0, max_scroll);
+                    container.set_scroll_top(new_scroll as i32);
+                } else if item_rect.bottom() > view_bottom {
+                    // 向下：仅把条目拉回到 view_bottom 位置附近
+                    let delta = item_rect.bottom() - view_bottom;
+                    let new_scroll = (current_scroll + delta).clamp(0.0, max_scroll);
+                    container.set_scroll_top(new_scroll as i32);
+                }
             }
         }
     }
