@@ -36,6 +36,7 @@ pub enum NodeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UiNode {
     pub id: String,
+    pub order: usize,
     pub label: String,
     pub kind: NodeKind,
     pub directory_path: Option<String>,

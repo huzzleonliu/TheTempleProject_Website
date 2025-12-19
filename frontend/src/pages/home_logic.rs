@@ -88,6 +88,7 @@ impl HomeLogic {
                 let mut nodes = build_ui_nodes(&directories, &assets);
                 let overview_node = UiNode {
                     id: format!("overview:{}", key),
+                    order: 0,
                     label: "Overview".to_string(),
                     kind: NodeKind::Overview,
                     directory_path: if key.is_empty() { None } else { Some(key.clone()) },
@@ -117,7 +118,8 @@ impl HomeLogic {
                 });
                 if current_path.get().is_none() {
                     vec![UiNode {
-                        id: ROOT_PATH.to_string(),
+                        id: ROOT_PATH.to_string(),  
+                        order: 0,
                         label: "/".to_string(),
                         kind: NodeKind::Directory,
                         directory_path: Some(ROOT_PATH.to_string()),
@@ -352,6 +354,7 @@ fn build_ui_nodes(directories: &[DirectoryNode], assets: &[AssetNode]) -> Vec<Ui
         .iter()
         .map(|dir| UiNode {
             id: dir.path.clone(),
+            order: 0,
             label: dir.raw_filename.clone(),
             kind: NodeKind::Directory,
             directory_path: Some(dir.path.clone()),
@@ -360,16 +363,26 @@ fn build_ui_nodes(directories: &[DirectoryNode], assets: &[AssetNode]) -> Vec<Ui
         })
         .collect();
 
-    nodes.extend(assets.iter().map(|asset| UiNode {
+    nodes.extend(assets.iter().map(|asset| {
+        // 如果文件名中包含 _ 且第一个部分是数字，则认为文件已重命名，取第二个部分作为文件名
+        // 这是一个临时的改动，因为目前的资源文件名都没有完整地被重命名，期望未来文件名都以“序号_原始文件名.ext”的形式命名
+        let mut label = asset.raw_filename.clone();
+        let mut order = 1;
+        if asset.raw_filename.contains("_") && asset.raw_filename.split("_").nth(0).is_some_and(|s| s.parse::<usize>().is_ok()) {
+            label = asset.raw_filename.split("_").nth(1).unwrap().to_string();
+            order = asset.raw_filename.split("_").nth(0).unwrap().parse::<usize>().unwrap();
+        }
+        UiNode {
         id: asset.file_path.clone(),
-        label: asset.raw_filename.clone(),
+        label: label,
+        order: order,
         kind: classify_asset_kind(&asset.raw_filename),
         directory_path: None,
         raw_path: Some(asset.raw_path.clone()),
         has_children: false,
-    }));
-
-    nodes.sort_by_key(|node| node.label.to_ascii_lowercase());
+    }}));
+    // 按照序号排序，如果序号相同，则按照文件名排序
+    nodes.sort_by_key(|node| (node.order, node.label.to_ascii_lowercase()));
     nodes
 }
 
