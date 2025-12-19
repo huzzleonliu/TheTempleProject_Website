@@ -4,6 +4,7 @@ services:
     build:
       context: ./frontend # 前端 Dockerfile 目录
       dockerfile: Dockerfile.prod # 使用生产环境的 Dockerfile
+    image: localhost/thetempleproject_website_frontend:latest
     networks:
       - the_temple_project_net
     expose:
@@ -14,6 +15,7 @@ services:
     build:
       context: ./frontend # 前端 Dockerfile 目录
       dockerfile: Dockerfile.dev # 使用开发环境的 Dockerfile
+    image: localhost/thetempleproject_website_frontend_dev:latest
     networks:
       - the_temple_project_net
     expose:
@@ -33,6 +35,7 @@ services:
   backend:
     container_name: tp_backend # 容器名称
     build: ./backend # 后端 Dockerfile 目录
+    image: localhost/thetempleproject_website_backend:latest
     networks:
       - the_temple_project_net
     environment:
@@ -45,6 +48,7 @@ services:
   database:
     container_name: tp_database
     build: ./database
+    image: localhost/thetempleproject_website_database:latest
     networks:
       - the_temple_project_net
     expose:
@@ -59,6 +63,7 @@ services:
   resource:
     container_name: tp_resource # 容器名称
     build: ./resource # 资源服务 Dockerfile 目录
+    image: localhost/thetempleproject_website_resource:latest
     networks:
       - the_temple_project_net
     environment:
@@ -73,6 +78,7 @@ services:
   nginx:
     container_name: tp_nginx # 容器名称
     build: ./nginx # Dockerfile 所在目录
+    image: localhost/thetempleproject_website_nginx:latest
     ports:
       - "8080:80"
     networks:
