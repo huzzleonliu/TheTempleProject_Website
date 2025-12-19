@@ -33,7 +33,12 @@ pub fn rename_in_order<E: RenamableEntry>(
     let mut final_paths: Vec<(usize, PathBuf, String)> = Vec::with_capacity(entries.len());
     for (idx, entry) in entries.iter().enumerate() {
         // 获取原始文件名
-        let mut original_name = entry.file_name().to_string();
+        let mut original_name = entry
+            .path()
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
         // 如果文件名中包含 _ 且第一个部分是数字，则认为文件已重命名，取第二个部分作为原始文件名
         let have_renamed = original_name.contains("_") && original_name.split("_").nth(0).is_some_and(|s| s.parse::<usize>().is_ok());
         if have_renamed {
