@@ -19,7 +19,7 @@ echo "[数据库导入] 正在导入 node.csv 与 visual_assets.csv ..."
 
 ${COMPOSE_CMD} --profile dev up -d database >/dev/null
 
-${COMPOSE_CMD} exec -T database bash -c '
+${COMPOSE_CMD} --profile dev exec -T database bash -c '
 set -euo pipefail
 IMPORT_DIR="/import_exchange"
 NODE_CSV="${IMPORT_DIR}/node.csv"
