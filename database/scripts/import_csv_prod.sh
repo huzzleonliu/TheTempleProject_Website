@@ -17,7 +17,7 @@ fi
 
 echo "[数据库导入] 正在导入 node.csv 与 visual_assets.csv ..."
 
-${COMPOSE_CMD} up -d database >/dev/null
+${COMPOSE_CMD} --profile prod up -d database >/dev/null
 
 ${COMPOSE_CMD} exec -T database bash -c '
 set -euo pipefail

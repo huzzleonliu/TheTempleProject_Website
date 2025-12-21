@@ -31,6 +31,6 @@ echo "[资源扫描] CSV 已输出至 ${OUTPUT_DIR}"
 
 COMPOSE_CMD="${COMPOSE_CMD:-podman-compose}"
 echo "[资源扫描] 调用数据库导入脚本..."
-"${REPO_ROOT}/database/scripts/import_csv.sh"
+"${REPO_ROOT}/database/scripts/import_csv_dev.sh"
 echo "[资源扫描] 资源刷新与数据库导入完成"
 
