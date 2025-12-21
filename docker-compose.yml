@@ -9,6 +9,11 @@ services:
       - the_temple_project_net
     expose:
       - "80"
+    profiles: [ "prod" ]
+    volumes:
+      - type: bind
+        source: ./frontend/dist
+        target: /app/dist
 
   frontend_dev:
     container_name: tp_frontend_dev # 容器名称
@@ -31,7 +36,7 @@ services:
       # 保护 dist/target 不被宿主机或其它 trunk 进程互相覆盖（避免 js/wasm 丢失导致 MIME 报错白屏）
       - /app/dist
       - /app/target
-
+    profiles: [ "dev" ]
   backend:
     container_name: tp_backend # 容器名称
     build: ./backend # 后端 Dockerfile 目录
@@ -44,7 +49,7 @@ services:
       - "80"
     depends_on:
       - database # 确保数据库容器先启动
-
+    profiles: [ "prod", "dev" ]
   database:
     container_name: tp_database
     build: ./database
@@ -59,7 +64,7 @@ services:
       - type: bind
         source: ./database/import_exchange
         target: /import_exchange # CSV 交换目录
-
+    profiles: [ "prod", "dev" ]
   resource:
     container_name: tp_resource # 容器名称
     build: ./resource # 资源服务 Dockerfile 目录
@@ -74,7 +79,7 @@ services:
       - type: bind
         source: ./resource/resource
         target: /resource # 将宿主 /resource/ 直接映射进容器
-
+    profiles: [ "prod", "dev" ]
   nginx:
     container_name: tp_nginx # 容器名称
     build: ./nginx # Dockerfile 所在目录
@@ -91,6 +96,7 @@ services:
       - type: bind
         source: ./nginx/nginx/
         target: /etc/nginx/ # 挂载 Nginx 配置文件目录
+    profiles: [ "prod", "dev" ]
 
 networks:
   the_temple_project_net: # 自定义网络确保容器间通过名称通信

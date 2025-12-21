@@ -2,7 +2,7 @@
 # will have compiled files and executables
 frontend/debug/
 frontend/target/
-frontend/dist/
+# frontend/dist/
 frontend/style/output.css
 frontend/node_modules/
 backend/debug/
