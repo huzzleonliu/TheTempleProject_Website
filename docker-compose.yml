@@ -100,3 +100,5 @@ services:
 
 networks:
   the_temple_project_net: # 自定义网络确保容器间通过名称通信
+    name: the_temple_project_net
+    driver: bridge
