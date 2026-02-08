@@ -13,7 +13,7 @@ services:
     volumes:
       - type: bind
         source: ./frontend/dist
-        target: /app/dist
+        target: /usr/share/nginx/html
 
   frontend_dev:
     container_name: tp_frontend_dev # 容器名称
@@ -99,6 +99,7 @@ services:
     profiles: [ "prod", "dev" ]
 
 networks:
-  the_temple_project_net: # 自定义网络确保容器间通过名称通信
+  the_temple_project_net:
+    # 自定义网络确保容器间通过名称通信
     name: the_temple_project_net
     driver: bridge

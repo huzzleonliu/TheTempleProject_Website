@@ -35,7 +35,7 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Copy built files from builder stage
-COPY ./dist /usr/share/nginx/html
+# COPY ./dist /usr/share/nginx/html
 
 # 设置正确的文件权限
 RUN chown -R nginx:nginx /usr/share/nginx/html && \
