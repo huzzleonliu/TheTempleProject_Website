@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 EXCHANGE_DIR="${REPO_ROOT}/database/import_exchange"
-COMPOSE_CMD="${COMPOSE_CMD:-podman-compose}"
+COMPOSE_CMD="${COMPOSE_CMD:-podman compose}"
 
 NODE_CSV="${EXCHANGE_DIR}/node.csv"
 VISUAL_CSV="${EXCHANGE_DIR}/visual_assets.csv"
@@ -17,9 +17,9 @@ fi
 
 echo "[数据库导入] 正在导入 node.csv 与 visual_assets.csv ..."
 
-${COMPOSE_CMD} --profile prod up -d database >/dev/null
+${COMPOSE_CMD} -f "${REPO_ROOT}/docker-compose.yml" --profile prod up -d database >/dev/null
 
-${COMPOSE_CMD} --profile prod exec -T database bash -c '
+${COMPOSE_CMD} -f "${REPO_ROOT}/docker-compose.yml" --profile prod exec -T database bash -c '
 set -euo pipefail
 IMPORT_DIR="/import_exchange"
 NODE_CSV="${IMPORT_DIR}/node.csv"
